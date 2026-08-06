@@ -1,147 +1,179 @@
 import React, { useState, useEffect } from 'react';
-import { Activity, Shield, RefreshCw, Radio, Terminal, Server, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { LayoutDashboard, Layers, Terminal, Activity, Shield, RefreshCw, Cpu, CheckCircle2, AlertTriangle } from 'lucide-react';
+import Dashboard from './pages/Dashboard';
+import Sessions from './pages/Sessions';
+import Playground from './pages/Playground';
 
 export default function App() {
-  const [healthStatus, setHealthStatus] = useState({ status: 'connecting', engines: {} });
-  const [logs, setLogs] = useState([
-    { id: 1, type: 'info', engine: 'System', message: 'ARC Dashboard initialized' },
-    { id: 2, type: 'flight', engine: 'Flight Recorder', message: 'Awaiting active agent session stream...' },
-    { id: 3, type: 'firewall', engine: 'Context Firewall', message: 'Rules engine active & validating...' },
-    { id: 4, type: 'recovery', engine: 'Recovery Engine', message: 'Checkpoint storage standing by...' }
-  ]);
+  const [activeTab, setActiveTab] = useState('dashboard');
+  const [selectedSessionId, setSelectedSessionId] = useState(null);
+  const [connectionStatus, setConnectionStatus] = useState('connected');
 
   useEffect(() => {
-    // Basic health status polling from FastAPI backend
-    const checkHealth = async () => {
+    // Check backend health
+    const checkBackend = async () => {
       try {
         const res = await fetch('http://localhost:8000/health');
         if (res.ok) {
-          const data = await res.json();
-          setHealthStatus(data);
+          setConnectionStatus('connected');
+        } else {
+          setConnectionStatus('degraded');
         }
       } catch (err) {
-        setHealthStatus({ status: 'offline', error: err.message });
+        setConnectionStatus('disconnected');
       }
     };
 
-    checkHealth();
-    const interval = setInterval(checkHealth, 5000);
+    checkBackend();
+    const interval = setInterval(checkBackend, 10000);
     return () => clearInterval(interval);
   }, []);
 
+  const handleSelectSession = (sessionId) => {
+    setSelectedSessionId(sessionId);
+    setActiveTab('sessions');
+  };
+
+  const renderContent = () => {
+    switch (activeTab) {
+      case 'dashboard':
+        return <Dashboard onSelectSession={handleSelectSession} />;
+      case 'sessions':
+        return <Sessions onSelectSession={handleSelectSession} />;
+      case 'playground':
+        return <Playground />;
+      default:
+        return <Dashboard onSelectSession={handleSelectSession} />;
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-[#0B0F19] text-slate-100 flex flex-col">
-      {/* Header */}
-      <header className="border-b border-slate-800 bg-[#111827]/80 backdrop-blur sticky top-0 z-50 px-6 py-4 flex items-center justify-between">
+    <div className="min-h-screen bg-[#0A0A0F] text-[#F1F5F9] flex flex-col font-sans antialiased">
+      {/* Top Header */}
+      <header className="h-16 border-b border-[#1E1E2E] bg-[#12121A]/90 backdrop-blur sticky top-0 z-50 px-6 flex items-center justify-between">
+        {/* Monospace Logo */}
         <div className="flex items-center space-x-3">
-          <div className="h-9 w-9 rounded-lg bg-blue-600 flex items-center justify-center font-bold text-white shadow-lg shadow-blue-500/20">
+          <div className="h-9 px-3 rounded-lg bg-[#6366F1] flex items-center justify-center font-mono font-bold text-white text-base shadow-lg shadow-[#6366F1]/20 tracking-wider">
             ARC
           </div>
           <div>
-            <h1 className="font-bold text-lg leading-none">Agent Runtime Core</h1>
-            <p className="text-xs text-slate-400 mt-1">Reliability Infrastructure for Claude Agents</p>
+            <h1 className="font-mono font-bold text-sm text-[#F1F5F9] leading-none tracking-wide">
+              AGENT RUNTIME CORE
+            </h1>
+            <p className="text-[11px] text-[#94A3B8] font-mono mt-0.5">
+              Reliability & Traceability Layer for Claude AI Agents
+            </p>
           </div>
         </div>
 
-        <div className="flex items-center space-x-4">
-          <div className="flex items-center space-x-2 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-full text-xs">
-            <span className={`h-2.5 w-2.5 rounded-full ${healthStatus.status === 'healthy' ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`}></span>
-            <span className="capitalize font-mono text-slate-300">
-              Backend: {healthStatus.status || 'checking'}
+        {/* Connection Status Indicator */}
+        <div className="flex items-center space-x-4 font-mono text-xs">
+          <div className="flex items-center space-x-2 bg-[#0A0A0F] border border-[#1E1E2E] px-3 py-1.5 rounded-full">
+            <span
+              className={`h-2.5 w-2.5 rounded-full ${
+                connectionStatus === 'connected'
+                  ? 'bg-[#10B981] animate-pulse'
+                  : connectionStatus === 'degraded'
+                  ? 'bg-[#F59E0B]'
+                  : 'bg-[#EF4444]'
+              }`}
+            ></span>
+            <span className="text-[#94A3B8] capitalize">
+              System: <strong className="text-[#F1F5F9]">{connectionStatus}</strong>
             </span>
           </div>
         </div>
       </header>
 
-      {/* Main Dashboard Layout */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-6 space-y-6">
-        {/* Engine Cards Overview */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {/* Flight Recorder */}
-          <div className="bg-[#111827] border border-slate-800 rounded-xl p-5 hover:border-indigo-500/50 transition-all group">
-            <div className="flex items-center justify-between mb-3">
-              <div className="p-2.5 rounded-lg bg-indigo-500/10 text-indigo-400 group-hover:bg-indigo-500 group-hover:text-white transition-colors">
-                <Activity className="h-6 w-6" />
-              </div>
-              <span className="text-xs font-mono px-2.5 py-1 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                Operational
+      {/* Main Layout: Sidebar (240px) + Content */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Sidebar Navigation (240px wide) */}
+        <aside className="w-[240px] bg-[#12121A] border-r border-[#1E1E2E] p-4 flex flex-col justify-between shrink-0 font-mono text-xs">
+          <div className="space-y-6">
+            <div className="space-y-1">
+              <span className="px-3 text-[10px] text-[#94A3B8] uppercase tracking-wider font-semibold">
+                Navigation
               </span>
-            </div>
-            <h3 className="font-semibold text-lg">Flight Recorder</h3>
-            <p className="text-sm text-slate-400 mt-1">
-              Records every Claude API decision, tool execution, and context snapshot for full replay.
-            </p>
-          </div>
 
-          {/* Context Firewall */}
-          <div className="bg-[#111827] border border-slate-800 rounded-xl p-5 hover:border-amber-500/50 transition-all group">
-            <div className="flex items-center justify-between mb-3">
-              <div className="p-2.5 rounded-lg bg-amber-500/10 text-amber-400 group-hover:bg-amber-500 group-hover:text-white transition-colors">
-                <Shield className="h-6 w-6" />
-              </div>
-              <span className="text-xs font-mono px-2.5 py-1 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                Operational
+              <button
+                onClick={() => setActiveTab('dashboard')}
+                className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg transition-colors font-medium ${
+                  activeTab === 'dashboard'
+                    ? 'bg-[#6366F1]/10 text-[#6366F1] border border-[#6366F1]/20 font-semibold'
+                    : 'text-[#94A3B8] hover:text-[#F1F5F9] hover:bg-[#1E1E2E]/50'
+                }`}
+              >
+                <LayoutDashboard className="w-4 h-4" />
+                <span>Dashboard</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('sessions')}
+                className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg transition-colors font-medium ${
+                  activeTab === 'sessions'
+                    ? 'bg-[#6366F1]/10 text-[#6366F1] border border-[#6366F1]/20 font-semibold'
+                    : 'text-[#94A3B8] hover:text-[#F1F5F9] hover:bg-[#1E1E2E]/50'
+                }`}
+              >
+                <Layers className="w-4 h-4" />
+                <span>Sessions</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('playground')}
+                className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg transition-colors font-medium ${
+                  activeTab === 'playground'
+                    ? 'bg-[#6366F1]/10 text-[#6366F1] border border-[#6366F1]/20 font-semibold'
+                    : 'text-[#94A3B8] hover:text-[#F1F5F9] hover:bg-[#1E1E2E]/50'
+                }`}
+              >
+                <Terminal className="w-4 h-4" />
+                <span>Playground</span>
+              </button>
+            </div>
+
+            {/* Engine Overview Widget in Sidebar */}
+            <div className="space-y-2 pt-4 border-t border-[#1E1E2E]">
+              <span className="px-3 text-[10px] text-[#94A3B8] uppercase tracking-wider font-semibold">
+                Engines
               </span>
-            </div>
-            <h3 className="font-semibold text-lg">Context Firewall</h3>
-            <p className="text-sm text-slate-400 mt-1">
-              Filters, validates, and catches conflicting data sources before sending prompts to Claude.
-            </p>
-          </div>
-
-          {/* Recovery Engine */}
-          <div className="bg-[#111827] border border-slate-800 rounded-xl p-5 hover:border-emerald-500/50 transition-all group">
-            <div className="flex items-center justify-between mb-3">
-              <div className="p-2.5 rounded-lg bg-emerald-500/10 text-emerald-400 group-hover:bg-emerald-500 group-hover:text-white transition-colors">
-                <RefreshCw className="h-6 w-6" />
+              <div className="space-y-1.5 px-3">
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="flex items-center gap-1.5 text-slate-300">
+                    <Activity className="w-3 h-3 text-[#6366F1]" />
+                    Flight Recorder
+                  </span>
+                  <span className="text-[#10B981]">Active</span>
+                </div>
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="flex items-center gap-1.5 text-slate-300">
+                    <Shield className="w-3 h-3 text-[#F59E0B]" />
+                    Context Firewall
+                  </span>
+                  <span className="text-[#10B981]">Active</span>
+                </div>
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="flex items-center gap-1.5 text-slate-300">
+                    <RefreshCw className="w-3 h-3 text-[#10B981]" />
+                    Recovery Engine
+                  </span>
+                  <span className="text-[#10B981]">Active</span>
+                </div>
               </div>
-              <span className="text-xs font-mono px-2.5 py-1 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                Operational
-              </span>
-            </div>
-            <h3 className="font-semibold text-lg">Recovery Engine</h3>
-            <p className="text-sm text-slate-400 mt-1">
-              Automated state checkpointing and instant state recovery from API or agent failures.
-            </p>
-          </div>
-        </div>
-
-        {/* Live Stream / Terminal Panel */}
-        <div className="bg-[#111827] border border-slate-800 rounded-xl p-5">
-          <div className="flex items-center justify-between mb-4 border-b border-slate-800 pb-3">
-            <div className="flex items-center space-x-2">
-              <Terminal className="h-5 w-5 text-blue-400" />
-              <h2 className="font-semibold text-slate-200">Runtime Telemetry Stream</h2>
-            </div>
-            <div className="flex items-center space-x-2 text-xs text-slate-400 font-mono">
-              <Radio className="h-4 w-4 text-emerald-400 animate-pulse" />
-              <span>LIVE LOGS</span>
             </div>
           </div>
 
-          <div className="font-mono text-xs space-y-2 bg-[#090D16] p-4 rounded-lg border border-slate-800/80 max-h-72 overflow-y-auto">
-            {logs.map((log) => (
-              <div key={log.id} className="flex items-start space-x-3 border-b border-slate-900 pb-1.5 last:border-0">
-                <span className="text-slate-500 select-none">[{new Date().toLocaleTimeString()}]</span>
-                <span className={`px-1.5 py-0.5 rounded font-semibold text-[10px] uppercase ${
-                  log.engine === 'Flight Recorder' ? 'bg-indigo-500/20 text-indigo-300' :
-                  log.engine === 'Context Firewall' ? 'bg-amber-500/20 text-amber-300' :
-                  log.engine === 'Recovery Engine' ? 'bg-emerald-500/20 text-emerald-300' :
-                  'bg-blue-500/20 text-blue-300'
-                }`}>
-                  {log.engine}
-                </span>
-                <span className="text-slate-300">{log.message}</span>
-              </div>
-            ))}
+          <div className="p-3 bg-[#0A0A0F] border border-[#1E1E2E] rounded-lg text-[11px] text-[#94A3B8]">
+            <div>ARC Version: <strong className="text-[#F1F5F9]">v1.0.0</strong></div>
+            <div>Model: <strong className="text-[#6366F1]">claude-sonnet-4-6</strong></div>
           </div>
-        </div>
-      </main>
+        </aside>
 
-      {/* Footer */}
-      <footer className="border-t border-slate-800 py-4 text-center text-xs text-slate-500 mt-auto">
-        ARC — Agent Runtime Core &copy; 2026. Built with FastAPI, React, PostgreSQL & Redis.
-      </footer>
+        {/* Main Content Area (Right side) */}
+        <main className="flex-1 overflow-y-auto p-6 bg-[#0A0A0F]">
+          {renderContent()}
+        </main>
+      </div>
     </div>
   );
 }
