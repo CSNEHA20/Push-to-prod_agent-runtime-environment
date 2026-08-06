@@ -8,7 +8,7 @@ from db.database import Base
 
 if TYPE_CHECKING:
     from models.trace import TraceStep
-    from models.context import ContextConflict
+    from models.context import ContextConflict, ContextLog
     from models.checkpoint import Checkpoint, FailureEvent
 
 
@@ -39,6 +39,9 @@ class AgentSession(Base):
     )
     context_conflicts: Mapped[List["ContextConflict"]] = relationship(
         "ContextConflict", back_populates="session", cascade="all, delete-orphan"
+    )
+    context_logs: Mapped[List["ContextLog"]] = relationship(
+        "ContextLog", back_populates="session", cascade="all, delete-orphan"
     )
     checkpoints: Mapped[List["Checkpoint"]] = relationship(
         "Checkpoint", back_populates="session", cascade="all, delete-orphan"
