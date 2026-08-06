@@ -71,16 +71,19 @@ try:
     from api.routes.sessions import router as sessions_router
     from api.routes.traces import router as traces_router
     from api.routes.context import router as context_router
+    from api.routes.recovery import router as recovery_router
     from api.websocket import router as ws_router
 except ImportError:
     from arc.backend.api.routes.sessions import router as sessions_router
     from arc.backend.api.routes.traces import router as traces_router
     from arc.backend.api.routes.context import router as context_router
+    from arc.backend.api.routes.recovery import router as recovery_router
     from arc.backend.api.websocket import router as ws_router
 
 app.include_router(sessions_router)
 app.include_router(traces_router)
 app.include_router(context_router)
+app.include_router(recovery_router)
 app.include_router(ws_router)
 
 @app.get("/")

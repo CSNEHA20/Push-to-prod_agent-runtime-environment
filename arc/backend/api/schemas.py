@@ -100,3 +100,48 @@ class ProvenanceResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+
+class CheckpointResponse(BaseModel):
+    checkpoint_id: uuid.UUID
+    session_id: uuid.UUID
+    step_number: int
+    timestamp: datetime
+    agent_state: Any
+    messages_history: Any
+    context_snapshot: Optional[str] = None
+    tool_results: Optional[Any] = None
+    is_valid: bool
+    validation_score: float
+    was_used_for_recovery: bool
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class FailureEventResponse(BaseModel):
+    failure_id: uuid.UUID
+    session_id: uuid.UUID
+    step_number: int
+    failure_type: str
+    error_message: str
+    timestamp: datetime
+    recovery_attempted: bool
+    recovery_checkpoint_id: Optional[uuid.UUID] = None
+    recovery_success: bool
+    steps_replayed: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class RecoveryStatusResponse(BaseModel):
+    total_checkpoints: int
+    valid_checkpoints: int
+    total_failures: int
+    recoveries_attempted: int
+    recoveries_successful: int
+    last_checkpoint_step: Optional[int] = None
+    last_failure_step: Optional[int] = None
+    overall_health: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
