@@ -54,3 +54,49 @@ class ReplayResponse(BaseModel):
 class DeleteSessionResponse(BaseModel):
     message: str
     session_id: uuid.UUID
+
+
+class ConflictResponse(BaseModel):
+    conflict_id: uuid.UUID
+    session_id: Optional[uuid.UUID] = None
+    step_number: Optional[int] = None
+    conflict_type: str
+    description: str
+    severity: str
+    resolution: Optional[str] = None
+    source_a_id: Optional[str] = None
+    source_b_id: Optional[str] = None
+    detected_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ConflictSummaryResponse(BaseModel):
+    total_conflicts: int
+    by_severity: Dict[str, int]
+    by_type: Dict[str, int]
+    conflicts: List[ConflictResponse]
+
+
+class ContextLogResponse(BaseModel):
+    log_id: uuid.UUID
+    session_id: uuid.UUID
+    step_number: int
+    total_received: int
+    passed: int
+    rejected: int
+    final_context: Optional[str] = None
+    provenance_map: Optional[Dict[str, float]] = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ProvenanceResponse(BaseModel):
+    source_name: str
+    confidence: float
+    chunks_used: int
+    chunks_rejected: int
+
+    model_config = ConfigDict(from_attributes=True)
+
