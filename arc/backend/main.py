@@ -67,6 +67,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+try:
+    from api.routes.sessions import router as sessions_router
+    from api.routes.traces import router as traces_router
+    from api.websocket import router as ws_router
+except ImportError:
+    from arc.backend.api.routes.sessions import router as sessions_router
+    from arc.backend.api.routes.traces import router as traces_router
+    from arc.backend.api.websocket import router as ws_router
+
+app.include_router(sessions_router)
+app.include_router(traces_router)
+app.include_router(ws_router)
+
 @app.get("/")
 async def root_route() -> Dict[str, Any]:
     """Root endpoint returning service status."""
