@@ -90,14 +90,17 @@ class FlightRecorder:
         self,
         agent_name: str,
         task: str,
+        session_id: Optional[Union[uuid.UUID, str]] = None,
         session: Optional[AsyncSession] = None,
     ) -> AgentSession:
         """
         Creates AgentSession in DB and returns session object.
         """
+        parsed_id = self._parse_uuid(session_id) if session_id else uuid.uuid4()
         try:
             async with self._get_db(session) as db:
                 agent_session = AgentSession(
+                    session_id=parsed_id,
                     agent_name=agent_name,
                     task=task,
                     status="running",
