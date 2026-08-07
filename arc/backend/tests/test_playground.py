@@ -7,14 +7,34 @@ import pytest_asyncio
 from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+
 try:
     from main import app
+    from db.database import Base
     from demo.chaos_injector import ChaosInjector
     from demo.demo_agent import run_demo_agent, search_funding_information
 except ImportError:
     from arc.backend.main import app
+    from arc.backend.db.database import Base
     from arc.demo.chaos_injector import ChaosInjector
     from arc.demo.demo_agent import run_demo_agent, search_funding_information
+
+
+@pytest_asyncio.fixture
+async def async_db():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    SessionLocal = async_sessionmaker(
+        bind=engine, class_=AsyncSession, expire_on_commit=False, autoflush=False
+    )
+
+    async with SessionLocal() as session:
+        yield session
+
+    await engine.dispose()
 
 
 @pytest.fixture
@@ -67,13 +87,14 @@ def test_search_funding_information_conflicts():
 
 
 @pytest.mark.asyncio
-async def test_run_demo_agent_execution():
-    """Test running the demo agent asynchronously end-to-end."""
+async def test_run_demo_agent_execution(async_db):
+    """Test running the demo agent asynchronously end-to-end with in-memory DB."""
     with patch("api.websocket.publish_event", new_callable=AsyncMock), \
          patch("arc.backend.api.websocket.publish_event", new_callable=AsyncMock, create=True):
         res = await run_demo_agent(
             task="Research Anthropic and write investment brief",
             inject_chaos=False,
+            db_session=async_db,
         )
 
         assert res["status"] == "completed"
