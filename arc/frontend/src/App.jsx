@@ -39,7 +39,7 @@ export default function App() {
       case 'sessions':
         return <Sessions onSelectSession={handleSelectSession} />;
       case 'playground':
-        return <Playground />;
+        return <Playground onSelectSession={handleSelectSession} />;
       default:
         return <Dashboard onSelectSession={handleSelectSession} />;
     }
