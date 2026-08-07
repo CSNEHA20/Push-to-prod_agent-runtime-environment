@@ -67,7 +67,8 @@ class MockAnthropicClient:
 def get_default_anthropic_client(api_key: Optional[str] = None) -> Any:
     """Helper to initialize Anthropic client or fallback mock client."""
     key = api_key or os.getenv("ANTHROPIC_API_KEY")
-    if key and key != "mock-key":
+    invalid_keys = ("mock-key", "...", "your-api-key", "sk-ant-...")
+    if key and key not in invalid_keys and not key.startswith("sk-ant-..."):
         try:
             import anthropic
             return anthropic.Anthropic(api_key=key)
@@ -191,18 +192,42 @@ class ARCAgent:
         :return: Response text string from Claude
         """
         if self._runtime:
-            coro = self._runtime.call_claude(
-                messages=messages,
-                tools=tools,
-                context_sources=context_sources,
-            )
-            return self._execute(coro)
+            try:
+                coro = self._runtime.call_claude(
+                    messages=messages,
+                    tools=tools,
+                    context_sources=context_sources,
+                )
+                return self._execute(coro)
+            except Exception as e:
+                if "invalid x-api-key" in str(e).lower() or "401" in str(e) or "AuthenticationError" in type(e).__name__:
+                    logger.warning(f"Anthropic API key invalid/unauthorized: {e}. Falling back to Mock client.")
+                    self.anthropic_client = MockAnthropicClient()
+                    self._runtime.anthropic_client = self.anthropic_client
+                    self._runtime.context_firewall.client = self.anthropic_client
+                    coro = self._runtime.call_claude(
+                        messages=messages,
+                        tools=tools,
+                        context_sources=context_sources,
+                    )
+                    return self._execute(coro)
+                raise e
 
         # Direct Anthropic client fallback if local runtime core module is absent
         kwargs = {"model": "claude-sonnet-4-6", "max_tokens": 1024, "messages": messages}
         if tools:
             kwargs["tools"] = tools
-        res = self.anthropic_client.messages.create(**kwargs)
+
+        try:
+            res = self.anthropic_client.messages.create(**kwargs)
+        except Exception as e:
+            if "invalid x-api-key" in str(e).lower() or "401" in str(e) or "AuthenticationError" in type(e).__name__:
+                logger.warning(f"Anthropic API key invalid/unauthorized: {e}. Falling back to Mock client.")
+                self.anthropic_client = MockAnthropicClient()
+                res = self.anthropic_client.messages.create(**kwargs)
+            else:
+                raise e
+
         if hasattr(res, "content") and res.content:
             if isinstance(res.content, list):
                 return res.content[0].text if hasattr(res.content[0], "text") else str(res.content[0])
