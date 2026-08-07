@@ -6,16 +6,20 @@ export default {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        serif: ['"Source Serif 4"', 'serif'],
+        sans: ['"Inter"', 'sans-serif'],
+        mono: ['"JetBrains Mono"', 'monospace'],
+      },
       colors: {
         arc: {
-          bg: "#0A0A0F",
-          surface: "#12121A",
-          card: "#12121A",
-          border: "#1E1E2E",
-          accent: "#6366F1",
-          success: "#10B981",
-          warning: "#F59E0B",
-          danger: "#EF4444",
+          bg: "#131316",
+          surface: "#1F1C19",
+          outline: "#34302C",
+          primary: "#DA7756",
+          tertiary: "#10B981",
+          secondary: "#F59E0B",
+          error: "#EF4444",
           textPrimary: "#F1F5F9",
           textSecondary: "#94A3B8",
         }
