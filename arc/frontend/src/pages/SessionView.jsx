@@ -21,6 +21,9 @@ import ReplayControls from '../components/FlightRecorder/ReplayControls';
 import ContextGraph from '../components/ContextFirewall/ContextGraph';
 import ConflictAlert from '../components/ContextFirewall/ConflictAlert';
 import ProvenanceTag from '../components/ContextFirewall/ProvenanceTag';
+import CheckpointList from '../components/RecoveryEngine/CheckpointList';
+import RecoveryStatus from '../components/RecoveryEngine/RecoveryStatus';
+import LiveFeed from '../components/Dashboard/LiveFeed';
 
 export default function SessionView({ sessionId = 'a1b2c3d4-8899-0011-2233-445566778899', onBack }) {
   const [activeTab, setActiveTab] = useState('flight_recorder'); // 'flight_recorder' | 'context_firewall' | 'recovery_engine'
@@ -551,65 +554,72 @@ export default function SessionView({ sessionId = 'a1b2c3d4-8899-0011-2233-44556
 
         {/* Tab 3: Recovery Engine */}
         {activeTab === 'recovery_engine' && (
-          <div className="bg-arc-surface border border-arc-outline rounded-xl p-6 font-mono space-y-6">
-            <div className="flex items-center justify-between border-b border-arc-outline pb-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-arc-tertiary/10 rounded-lg border border-arc-tertiary/20 text-arc-tertiary">
-                  <RefreshCw className="w-6 h-6" />
-                </div>
-                <div>
-                  <h2 className="text-base font-bold text-arc-textPrimary">Recovery Engine Checkpoint Status</h2>
-                  <p className="text-xs text-arc-textSecondary mt-0.5">
-                    Automated failure detection, state rollback & deterministic recovery execution.
-                  </p>
-                </div>
-              </div>
-              <span className="px-3 py-1 bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-full text-xs font-bold flex items-center gap-1.5">
-                <RefreshCw className="w-3.5 h-3.5" />
-                Session Recovered at Step #4
-              </span>
-            </div>
+          <div className="space-y-6 font-mono">
+            {/* Checkpoint Timeline & Rollback Jumps */}
+            <CheckpointList 
+              steps={traceSteps.length > 0 ? traceSteps : [
+                { step_number: 1, name: 'search_codebase', status: 'completed', validation_score: 0.94, timestamp: new Date(Date.now() - 110000).toISOString(), is_checkpoint: true },
+                { step_number: 2, name: 'analyze_pool_config', status: 'completed', validation_score: 0.98, timestamp: new Date(Date.now() - 90000).toISOString(), is_checkpoint: true },
+                { step_number: 3, name: 'execute_sql', status: 'failed', validation_score: 0.35, timestamp: new Date(Date.now() - 60000).toISOString(), error: 'DatabaseError: Connection pool parameter max_overflow=NaN', is_checkpoint: false },
+                { step_number: 4, name: 'rollback_checkpoint', status: 'recovered', validation_score: 0.76, timestamp: new Date(Date.now() - 35000).toISOString(), rollback_target_step: 2, is_checkpoint: true },
+                { step_number: 5, name: 'apply_patch', status: 'completed', validation_score: 0.96, timestamp: new Date(Date.now() - 10000).toISOString(), is_checkpoint: true }
+              ]} 
+            />
 
-            {/* Checkpoint Stats */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-xs">
-              <div className="bg-arc-bg border border-arc-outline p-4 rounded-lg">
-                <span className="text-arc-textSecondary block mb-1">Total Checkpoints</span>
-                <span className="text-xl font-bold text-arc-textPrimary">5 Checkpoints</span>
-              </div>
-              <div className="bg-arc-bg border border-arc-outline p-4 rounded-lg">
-                <span className="text-arc-textSecondary block mb-1">Valid Checkpoints</span>
-                <span className="text-xl font-bold text-emerald-400">5 Valid (100%)</span>
-              </div>
-              <div className="bg-arc-bg border border-arc-outline p-4 rounded-lg">
-                <span className="text-arc-textSecondary block mb-1">Failures Intercepted</span>
-                <span className="text-xl font-bold text-red-400">1 Failure</span>
-              </div>
-              <div className="bg-arc-bg border border-arc-outline p-4 rounded-lg">
-                <span className="text-arc-textSecondary block mb-1">Recovery Result</span>
-                <span className="text-xl font-bold text-amber-400">SUCCESS</span>
-              </div>
-            </div>
+            {/* Recovery Engine Health Summary & Failure Interception Breakdown */}
+            <RecoveryStatus 
+              checkpointsSaved={traceSteps.filter(s => s.status !== 'failed').length || 4}
+              failuresDetected={traceSteps.filter(s => s.status === 'failed').length || 1}
+              recoverySuccessRate={100}
+              healthStatus={session?.recovered ? 'Healthy' : 'Degraded'}
+              failures={[
+                {
+                  id: 'fail-1',
+                  failure_type: 'DatabaseError Exception',
+                  error_message: 'DatabaseError: Connection refused (invalid pool parameter max_overflow=NaN)',
+                  failed_at_step: 3,
+                  recovered_at_step: 4,
+                  rollback_checkpoint_step: 2,
+                  steps_lost: 1,
+                  recovery_time_ms: 650,
+                  status: 'recovered'
+                }
+              ]}
+            />
 
-            {/* Recovery Timeline / Diff */}
-            <div className="border border-arc-outline rounded-lg bg-arc-bg p-4 space-y-4">
-              <h3 className="text-xs font-semibold text-arc-textSecondary uppercase tracking-wider flex items-center gap-2">
-                <GitCommit className="w-4 h-4 text-arc-tertiary" />
-                Rollback State & Diff Execution
-              </h3>
+            {/* Real-time Telemetry Live Feed Hook Integration */}
+            <LiveFeed sessionId={sessionId} />
 
-              <div className="p-3 bg-arc-surface border border-arc-outline rounded text-xs space-y-2">
-                <div className="flex items-center justify-between text-arc-textSecondary">
-                  <span>Target Restored Checkpoint: <strong className="text-arc-primary">chk_step_02</strong></span>
-                  <span>Validation Score: <strong className="text-emerald-400">0.98</strong></span>
+            {/* Rollback Diff & Safe Patch Execution Detail */}
+            <div className="bg-arc-surface border border-arc-outline rounded-xl p-5 font-mono space-y-4 shadow-sm">
+              <div className="flex items-center justify-between border-b border-arc-outline pb-3">
+                <div className="flex items-center gap-2">
+                  <GitCommit className="w-5 h-5 text-arc-tertiary" />
+                  <h3 className="text-sm font-bold text-arc-textPrimary uppercase tracking-wider">
+                    Automated State Rollback & Code Patch Diff
+                  </h3>
                 </div>
-                <div className="p-3 bg-[#131316] rounded border border-arc-outline font-mono text-[11px] space-y-1">
-                  <div className="text-red-400">- ConnectionPool(max_connections=NaN, overflow=False)</div>
-                  <div className="text-emerald-400">+ ConnectionPool(max_connections=20, max_overflow=10)</div>
+                <span className="text-xs text-emerald-400 font-semibold px-2.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20">
+                  Checkpoint #2 Restored
+                </span>
+              </div>
+
+              <div className="p-4 bg-arc-bg border border-arc-outline rounded-lg space-y-3">
+                <div className="flex items-center justify-between text-xs text-arc-textSecondary border-b border-arc-outline/50 pb-2">
+                  <span>Target Restored State: <strong className="text-arc-primary">chk_step_02 (0.98 Validation)</strong></span>
+                  <span>Patch File: <strong className="text-arc-textPrimary">src/db/connection.py</strong></span>
+                </div>
+                
+                <div className="p-3 bg-[#131316] rounded border border-arc-outline font-mono text-xs space-y-1.5 overflow-x-auto">
+                  <div className="text-arc-textSecondary text-[10px]">// Reverted invalid pool configuration & applied safe async parameters</div>
+                  <div className="text-red-400 font-bold">- async_engine = create_async_engine(DATABASE_URL, max_overflow=NaN)</div>
+                  <div className="text-emerald-400 font-bold">+ async_engine = create_async_engine(DATABASE_URL, pool_size=20, max_overflow=10)</div>
                 </div>
               </div>
             </div>
           </div>
         )}
+
       </div>
     </div>
   );
