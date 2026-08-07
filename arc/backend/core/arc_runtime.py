@@ -58,6 +58,20 @@ class ARCRuntime:
         )
         self.recovery_engine = RecoveryEngine(db_session=db_session)
 
+    @property
+    def db_session(self) -> Optional[AsyncSession]:
+        return self._db_session
+
+    @db_session.setter
+    def db_session(self, session: Optional[AsyncSession]) -> None:
+        self._db_session = session
+        if hasattr(self, "flight_recorder"):
+            self.flight_recorder._db_session = session
+        if hasattr(self, "context_firewall"):
+            self.context_firewall._db_session = session
+        if hasattr(self, "recovery_engine"):
+            self.recovery_engine._db_session = session
+
     async def _ensure_session(self) -> None:
         """
         Ensures the agent session is created and tracked in the database.
