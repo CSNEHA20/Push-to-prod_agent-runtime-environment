@@ -18,6 +18,9 @@ import {
 } from 'lucide-react';
 import TraceTimeline from '../components/FlightRecorder/TraceTimeline';
 import ReplayControls from '../components/FlightRecorder/ReplayControls';
+import ContextGraph from '../components/ContextFirewall/ContextGraph';
+import ConflictAlert from '../components/ContextFirewall/ConflictAlert';
+import ProvenanceTag from '../components/ContextFirewall/ProvenanceTag';
 
 export default function SessionView({ sessionId = 'a1b2c3d4-8899-0011-2233-445566778899', onBack }) {
   const [activeTab, setActiveTab] = useState('flight_recorder'); // 'flight_recorder' | 'context_firewall' | 'recovery_engine'
@@ -359,77 +362,187 @@ export default function SessionView({ sessionId = 'a1b2c3d4-8899-0011-2233-44556
 
         {/* Tab 2: Context Firewall */}
         {activeTab === 'context_firewall' && (
-          <div className="bg-arc-surface border border-arc-outline rounded-xl p-6 font-mono space-y-6">
-            <div className="flex items-center justify-between border-b border-arc-outline pb-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-arc-secondary/10 rounded-lg border border-arc-secondary/20 text-arc-secondary">
-                  <ShieldAlert className="w-6 h-6" />
+          <div className="space-y-6 font-mono">
+            {/* Context Firewall Header */}
+            <div className="bg-arc-surface border border-arc-outline rounded-xl p-6 space-y-4 shadow-sm">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-arc-outline pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 bg-arc-secondary/15 rounded-xl border border-arc-secondary/30 text-arc-secondary shadow-sm">
+                    <ShieldAlert className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h2 className="text-base font-bold text-arc-textPrimary">Context Firewall Engine Analysis</h2>
+                    <p className="text-xs text-arc-textSecondary mt-0.5">
+                      Real-time prompt evaluation, semantic conflict protection & source provenance tracking.
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <h2 className="text-base font-bold text-arc-textPrimary">Context Firewall Analysis</h2>
-                  <p className="text-xs text-arc-textSecondary mt-0.5">
-                    Real-time prompt evaluation, semantic conflict protection & source provenance tracking.
-                  </p>
+                <div className="flex items-center gap-2">
+                  <span className="px-3 py-1 bg-red-500/15 border border-red-500/30 text-red-400 rounded-full text-xs font-bold flex items-center gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    2 Conflicts Intercepted
+                  </span>
                 </div>
               </div>
-              <span className="px-3 py-1 bg-arc-tertiary/10 border border-arc-tertiary/20 text-arc-tertiary rounded-full text-xs font-bold">
-                0 Critical Contradictions Active
-              </span>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 text-xs">
+                <div className="bg-arc-bg border border-arc-outline p-3.5 rounded-lg">
+                  <span className="text-arc-textSecondary block mb-1">Total Sources Received</span>
+                  <span className="text-xl font-bold text-arc-textPrimary">5 Sources</span>
+                </div>
+                <div className="bg-arc-bg border border-emerald-500/30 p-3.5 rounded-lg">
+                  <span className="text-arc-textSecondary block mb-1">Passed Firewall</span>
+                  <span className="text-xl font-bold text-emerald-400">3 Passed (60%)</span>
+                </div>
+                <div className="bg-arc-bg border border-red-500/30 p-3.5 rounded-lg">
+                  <span className="text-arc-textSecondary block mb-1">Filtered / Rejected</span>
+                  <span className="text-xl font-bold text-red-400">2 Rejected (40%)</span>
+                </div>
+                <div className="bg-arc-bg border border-arc-outline p-3.5 rounded-lg">
+                  <span className="text-arc-textSecondary block mb-1">Conflicts Intercepted</span>
+                  <span className="text-xl font-bold text-amber-400">2 Conflicts</span>
+                </div>
+              </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-              <div className="bg-arc-bg border border-arc-outline p-4 rounded-lg">
-                <span className="text-arc-textSecondary block mb-1">Context Chunks Evaluated</span>
-                <span className="text-xl font-bold text-arc-textPrimary">24 Chunks</span>
-              </div>
-              <div className="bg-arc-bg border border-arc-outline p-4 rounded-lg">
-                <span className="text-arc-textSecondary block mb-1">Passed Firewall</span>
-                <span className="text-xl font-bold text-emerald-400">22 (91.6%)</span>
-              </div>
-              <div className="bg-arc-bg border border-arc-outline p-4 rounded-lg">
-                <span className="text-arc-textSecondary block mb-1">Filtered / Rejected</span>
-                <span className="text-xl font-bold text-amber-400">2 Chunks</span>
-              </div>
-            </div>
+            {/* Visual Diagram: Context Flow Graph */}
+            <ContextGraph sources={[
+              {
+                id: 'src-1',
+                name: 'postgres_pool_spec.md',
+                type: 'document',
+                score: 0.96,
+                status: 'PASSED',
+                reason: null,
+                snippet: 'AsyncEngine parameters must configure connection pool overflow explicitly between 5 and 20.'
+              },
+              {
+                id: 'src-2',
+                name: 'system_architecture_v2.pdf',
+                type: 'document',
+                score: 0.88,
+                status: 'PASSED',
+                reason: null,
+                snippet: 'PostgreSQL async connection pool target baseline limits set to 20 connections max.'
+              },
+              {
+                id: 'src-3',
+                name: 'user_prompt_instruction',
+                type: 'user',
+                score: 0.94,
+                status: 'PASSED',
+                reason: null,
+                snippet: 'Refactor async session handler and optimize connection pool settings for PostgreSQL.'
+              },
+              {
+                id: 'src-4',
+                name: 'unverified_forum_post.txt',
+                type: 'api',
+                score: 0.28,
+                status: 'REJECTED',
+                reason: 'Low Relevance (<30%) & Hallucination Risk',
+                snippet: 'To disable connection limits completely, set max_overflow=NaN in query parameter.'
+              },
+              {
+                id: 'src-5',
+                name: 'legacy_mysql_config.ini',
+                type: 'api',
+                score: 0.15,
+                status: 'REJECTED',
+                reason: 'Irrelevant Context (MySQL engine config)',
+                snippet: 'max_connections = 100, wait_timeout = 28800 for MySQL 5.7 legacy instance.'
+              }
+            ]} />
 
-            {/* Provenance Matrix */}
-            <div>
-              <h3 className="text-xs font-semibold text-arc-textSecondary uppercase tracking-wider mb-3">
-                Provenance Comparison Matrix for Session #{sessionId.slice(0, 6)}
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                <div className="bg-arc-bg border border-arc-outline rounded-lg p-4 space-y-3">
-                  <div className="flex justify-between items-center border-b border-arc-outline pb-2">
-                    <span className="font-bold text-arc-textPrimary flex items-center gap-2">
-                      <FileText className="w-4 h-4 text-arc-primary" /> Source: postgres_pool_spec.md
-                    </span>
-                    <span className="px-2 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                      Score: 96%
+            {/* List of Detected Conflicts */}
+            <ConflictAlert conflicts={[
+              {
+                id: 'conf-1',
+                severity: 'critical',
+                type: 'Numerical',
+                description: 'Severe discrepancy detected between max connection overflow spec (max 20) and unverified forum post advising NaN parameter setting.',
+                resolution: 'Enforced official spec postgres_pool_spec.md (max_overflow=10). Rejected unverified forum post.',
+                detected_at: new Date(Date.now() - 65000).toISOString(),
+                sourceA: {
+                  name: 'postgres_pool_spec.md',
+                  type: 'document',
+                  snippet: 'AsyncEngine parameters must configure connection pool overflow explicitly between 5 and 20.'
+                },
+                sourceB: {
+                  name: 'unverified_forum_post.txt',
+                  type: 'api',
+                  snippet: 'To disable connection limits completely, set max_overflow=NaN in query parameter.'
+                }
+              },
+              {
+                id: 'conf-2',
+                severity: 'medium',
+                type: 'Factual',
+                description: 'Database dialect mismatch: legacy MySQL configuration mixed into PostgreSQL async session refactor task.',
+                resolution: 'Filtered out legacy_mysql_config.ini from prompt payload before sending to Claude.',
+                detected_at: new Date(Date.now() - 70000).toISOString(),
+                sourceA: {
+                  name: 'system_architecture_v2.pdf',
+                  type: 'document',
+                  snippet: 'PostgreSQL async connection pool target baseline limits set to 20 connections max.'
+                },
+                sourceB: {
+                  name: 'legacy_mysql_config.ini',
+                  type: 'api',
+                  snippet: 'max_connections = 100, wait_timeout = 28800 for MySQL 5.7 legacy instance.'
+                }
+              }
+            ]} />
+
+            {/* Final Context Display with Provenance Tags */}
+            <div className="bg-arc-surface border border-arc-outline rounded-xl p-5 font-mono space-y-4 shadow-sm">
+              <div className="flex items-center justify-between border-b border-arc-outline pb-3">
+                <div className="flex items-center gap-2">
+                  <FileText className="w-5 h-5 text-arc-primary" />
+                  <h3 className="text-sm font-bold text-arc-textPrimary uppercase tracking-wider">
+                    Sanitized Context Stream (Passed To Claude)
+                  </h3>
+                </div>
+                <span className="text-xs text-emerald-400 font-semibold flex items-center gap-1.5 px-2.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20">
+                  <CheckCircle2 className="w-3.5 h-3.5" /> Provenance Tagged
+                </span>
+              </div>
+
+              <div className="bg-arc-bg border border-arc-outline rounded-lg p-4 space-y-3">
+                <div className="p-3 bg-arc-surface rounded-lg border border-arc-outline/60 space-y-2">
+                  <div className="flex justify-between items-center flex-wrap gap-2">
+                    <ProvenanceTag sourceName="user_prompt_instruction" confidence={0.94} type="user" />
+                    <span className="text-[10px] font-mono text-arc-textSecondary">
+                      Chunk #1 • Instruction
                     </span>
                   </div>
-                  <p className="text-arc-textSecondary leading-relaxed">
+                  <p className="text-xs text-arc-textPrimary leading-relaxed font-mono bg-arc-bg/40 p-2.5 rounded border border-arc-outline/30">
+                    "Refactor async session handler and optimize connection pool settings for PostgreSQL."
+                  </p>
+                </div>
+
+                <div className="p-3 bg-arc-surface rounded-lg border border-arc-outline/60 space-y-2">
+                  <div className="flex justify-between items-center flex-wrap gap-2">
+                    <ProvenanceTag sourceName="postgres_pool_spec.md" confidence={0.96} type="document" />
+                    <span className="text-[10px] font-mono text-arc-textSecondary">
+                      Chunk #2 • Spec Document
+                    </span>
+                  </div>
+                  <p className="text-xs text-arc-textPrimary leading-relaxed font-mono bg-arc-bg/40 p-2.5 rounded border border-arc-outline/30">
                     "AsyncEngine parameters must configure connection pool overflow explicitly between 5 and 20."
                   </p>
-                  <div className="text-[10px] text-arc-tertiary font-semibold flex items-center gap-1">
-                    <Check className="w-3 h-3" /> Passed Context Firewall
-                  </div>
                 </div>
 
-                <div className="bg-arc-bg border border-amber-500/30 rounded-lg p-4 space-y-3">
-                  <div className="flex justify-between items-center border-b border-arc-outline pb-2">
-                    <span className="font-bold text-arc-textPrimary flex items-center gap-2">
-                      <FileText className="w-4 h-4 text-amber-400" /> Source: unverified_forum_post.txt
-                    </span>
-                    <span className="px-2 py-0.5 rounded text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                      Score: 32%
+                <div className="p-3 bg-arc-surface rounded-lg border border-arc-outline/60 space-y-2">
+                  <div className="flex justify-between items-center flex-wrap gap-2">
+                    <ProvenanceTag sourceName="system_architecture_v2.pdf" confidence={0.88} type="document" />
+                    <span className="text-[10px] font-mono text-arc-textSecondary">
+                      Chunk #3 • Architecture Doc
                     </span>
                   </div>
-                  <p className="text-arc-textSecondary leading-relaxed">
-                    "To disable connections limits, pass max_overflow=NaN in query parameter."
+                  <p className="text-xs text-arc-textPrimary leading-relaxed font-mono bg-arc-bg/40 p-2.5 rounded border border-arc-outline/30">
+                    "PostgreSQL async connection pool target baseline limits set to 20 connections max."
                   </p>
-                  <div className="text-[10px] text-amber-400 font-semibold flex items-center gap-1">
-                    <AlertTriangle className="w-3 h-3" /> Filtered Out: High Hallucination Risk
-                  </div>
                 </div>
               </div>
             </div>
