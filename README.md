@@ -137,66 +137,113 @@ Judges lose their minds.
 
 ---
 
-## 🚀 Quick Start
+## 🚀 Quick Start & How to Run
 
 ### Prerequisites
 - Python 3.9+
 - Node.js 18+
-- Anthropic API Key
+- Anthropic API Key (optional for synthetic demo mode)
 
-### Installation
+---
+
+### Step-by-Step Installation & Running
+
+#### 1. Setup & Start Backend (FastAPI)
 
 ```bash
-# Clone the repository
-git clone https://github.com/yourusername/agent-runtime-core.git
-cd agent-runtime-core
-
-# Backend setup
+# Navigate to the backend directory
 cd arc/backend
+
+# Create & activate a virtual environment
+python -m venv venv
+# On Windows:
+venv\Scripts\activate
+# On Linux/macOS:
+source venv/bin/activate
+
+# Install python dependencies
 pip install -r requirements.txt
+
+# Create environment file from template
 cp .env.example .env
-# Add your ANTHROPIC_API_KEY to .env
 
-# Frontend setup
-cd ../frontend
-npm install
-npm run dev
+# Add your ANTHROPIC_API_KEY to .env (if calling live Claude models)
+# ANTHROPIC_API_KEY=your-api-key-here
 
-# Run the backend
-cd ../backend
+# Start FastAPI server
 python main.py
 ```
+> The API backend will start running at `http://localhost:8000`.
 
-### Usage
+#### 2. Start Frontend (React + Vite Dashboard)
+
+```bash
+# Open a new terminal and navigate to frontend directory
+cd arc/frontend
+
+# Install dependencies
+npm install
+
+# Start the frontend dev server
+npm run dev
+```
+> Access the developer dashboard in your browser at `http://localhost:5173`.
+
+#### 3. Run the Demo Agent & Chaos Simulator
+
+```bash
+# Open a terminal and navigate to demo directory
+cd arc/demo
+
+# Run the interactive demo agent script
+python demo_agent.py
+```
+> You can also inject chaos scenarios directly from the dashboard UI to observe how ARC handles API timeouts, conflicting documents, and unexpected agent failures.
+
+---
+
+### 💻 Using the Python SDK in Your Own Code
+
+You can wrap any custom Claude agent using the `arc_sdk`:
 
 ```python
 from arc_sdk import ARC
 
-# Initialize ARC
-arc = ARC(api_key="your-anthropic-api-key")
+# 1. Initialize ARC Client
+arc = ARC(endpoint="http://localhost:8000", api_key="your-anthropic-api-key")
 
-# Wrap your Claude agent
-@arc.agent
-def my_agent(task):
-    # Your agent logic here
-    response = claude.messages.create(
-        model="claude-3-5-sonnet-20241022",
-        messages=[{"role": "user", "content": task}]
-    )
-    return response
+# 2. Start an ARC Session
+session = arc.create_session(agent_name="ResearchAgent", task="Summarize quarterly report")
 
-# Run with ARC
-result = my_agent("Research company X and write a report")
+# 3. Filter input context with Context Firewall
+clean_context = session.filter_context(
+    documents=[doc1, doc2], 
+    relevance_threshold=0.75
+)
 
-# Access flight recorder
-arc.flight_recorder.replay()
+# 4. Record agent LLM & Tool decisions into Flight Recorder
+session.record_step(
+    decision="Searched financial database",
+    tools_called=["search_db"],
+    confidence=0.92
+)
 
-# View context provenance
-arc.context_firewall.get_provenance()
+# 5. Save Checkpoints for Recovery Engine
+session.checkpoint(state={"current_step": 4, "data_collected": [...]})
 
-# Recover from failure
-arc.recovery_engine.resume_from_checkpoint()
+# 6. Replay or Recover when an error occurs
+session.recover_last_checkpoint()
 ```
+
+---
+
+### 📊 Dashboard Features
+
+Once the UI is running at `http://localhost:5173`:
+- **Dashboard Overview**: View live session metrics, failure rates, context filtering stats, and active agents.
+- **Flight Recorder Tab**: Inspect step-by-step visual replays, prompt logs, and decision trees for any agent session.
+- **Context Firewall Tab**: View filtered vs. passed context chunks, relevance confidence scores, and source conflict flags.
+- **Recovery Engine Tab**: View checkpoint diffs, execution state snapshots, and trigger recovery flows.
 
 ---
 
