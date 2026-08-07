@@ -105,6 +105,7 @@ class ARCAgent:
         server_url: str = "http://localhost:8000",
         dashboard_url: str = "http://localhost:3000",
         session_id: Optional[Union[str, uuid.UUID]] = None,
+        db_session: Optional[Any] = None,
     ):
         """
         Initialize ARCAgent session wrapper.
@@ -116,6 +117,7 @@ class ARCAgent:
         :param server_url: Base URL of ARC backend server
         :param dashboard_url: Base URL of ARC dashboard frontend
         :param session_id: Optional existing session UUID
+        :param db_session: Optional database AsyncSession
         """
         self.name = name
         self.task = task
@@ -143,6 +145,7 @@ class ARCAgent:
                 agent_name=self.name,
                 task=self.task,
                 session_id=self._session_id,
+                db_session=db_session,
             )
         else:
             self._runtime = None
