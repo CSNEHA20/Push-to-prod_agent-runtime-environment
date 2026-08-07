@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Layers, Search, Filter, Play, Pause, FastForward, Rewind, Activity, ShieldAlert, CheckCircle2, ChevronRight, Terminal } from 'lucide-react';
+import { Layers, Search, Filter, Activity, ShieldAlert, CheckCircle2, ChevronRight, Terminal } from 'lucide-react';
 import AgentCard from '../components/Dashboard/AgentCard';
+import SessionView from './SessionView';
 
 export default function Sessions({ onSelectSession }) {
   const [search, setSearch] = useState('');
@@ -101,87 +102,13 @@ export default function Sessions({ onSelectSession }) {
         </div>
       </div>
 
-      {/* Right Pane: Deep-Dive Trace Viewer & Replay Timeline */}
+      {/* Right Pane: Deep-Dive Session View with Flight Recorder, Firewall & Recovery */}
       {selectedSessionId && (
-        <div className="w-2/3 bg-arc-surface border border-arc-outline rounded-xl flex flex-col overflow-hidden shadow-xl">
-          {/* Header */}
-          <div className="p-4 border-b border-arc-outline bg-arc-bg/50 flex justify-between items-center">
-            <div>
-              <h3 className="font-bold text-arc-textPrimary font-mono">{selectedSession?.agent_name}</h3>
-              <p className="text-xs text-arc-textSecondary font-mono mt-1">ID: {selectedSessionId}</p>
-            </div>
-            <button
-              onClick={() => setSelectedSessionId(null)}
-              className="text-xs font-mono text-arc-textSecondary hover:text-arc-textPrimary px-3 py-1 border border-arc-outline rounded hover:bg-arc-outline"
-            >
-              Close
-            </button>
-          </div>
-
-          {/* Trace Viewer (Scrollable) */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4 font-mono text-sm bg-[#131316]">
-            {mockTraces.slice(0, timelineStep).map((trace, idx) => (
-              <div key={idx} className="flex gap-4 p-3 rounded-lg border border-arc-outline/50 bg-arc-surface">
-                <div className="shrink-0 w-8 h-8 rounded bg-arc-bg flex items-center justify-center border border-arc-outline text-arc-textSecondary">
-                  {trace.step}
-                </div>
-                <div className="flex-1 space-y-1">
-                  <div className="flex items-center gap-2">
-                    {trace.type === 'tool_call' && <Terminal className="w-4 h-4 text-arc-primary" />}
-                    {trace.type === 'agent_thought' && <Activity className="w-4 h-4 text-arc-secondary" />}
-                    {trace.type === 'firewall_alert' && <ShieldAlert className="w-4 h-4 text-arc-error" />}
-                    <span className="font-semibold text-arc-textPrimary capitalize text-xs">
-                      {trace.type.replace('_', ' ')}
-                    </span>
-                    {trace.name && (
-                      <span className="text-[10px] bg-arc-outline px-1.5 py-0.5 rounded text-arc-textSecondary">
-                        {trace.name}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-arc-textSecondary text-xs leading-relaxed">{trace.content}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Step Replay Timeline Slider */}
-          <div className="p-4 border-t border-arc-outline bg-arc-surface">
-            <div className="flex items-center justify-between mb-4">
-              <span className="text-xs font-mono text-arc-textSecondary uppercase tracking-wider font-semibold">
-                Trace Replay Timeline
-              </span>
-              <span className="text-xs font-mono text-arc-primary font-bold">
-                Step {timelineStep} / {mockTraces.length}
-              </span>
-            </div>
-            
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2">
-                <button className="p-1.5 rounded hover:bg-arc-outline text-arc-textSecondary transition-colors" onClick={() => setTimelineStep(1)}>
-                  <Rewind className="w-4 h-4" />
-                </button>
-                <button
-                  className="p-2 rounded-full bg-arc-primary text-[#131316] hover:bg-arc-primary/90 transition-colors"
-                  onClick={() => setIsPlaying(!isPlaying)}
-                >
-                  {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-                </button>
-                <button className="p-1.5 rounded hover:bg-arc-outline text-arc-textSecondary transition-colors" onClick={() => setTimelineStep(mockTraces.length)}>
-                  <FastForward className="w-4 h-4" />
-                </button>
-              </div>
-              
-              <input
-                type="range"
-                min="1"
-                max={mockTraces.length}
-                value={timelineStep}
-                onChange={(e) => setTimelineStep(parseInt(e.target.value))}
-                className="flex-1 h-2 bg-arc-outline rounded-lg appearance-none cursor-pointer accent-arc-primary"
-              />
-            </div>
-          </div>
+        <div className="w-2/3 flex flex-col overflow-hidden">
+          <SessionView 
+            sessionId={selectedSessionId} 
+            onBack={() => setSelectedSessionId(null)} 
+          />
         </div>
       )}
     </div>
