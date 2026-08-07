@@ -69,7 +69,8 @@ def test_search_funding_information_conflicts():
 @pytest.mark.asyncio
 async def test_run_demo_agent_execution():
     """Test running the demo agent asynchronously end-to-end."""
-    with patch("arc.backend.core.arc_runtime.publish_event", new_callable=AsyncMock):
+    with patch("api.websocket.publish_event", new_callable=AsyncMock), \
+         patch("arc.backend.api.websocket.publish_event", new_callable=AsyncMock, create=True):
         res = await run_demo_agent(
             task="Research Anthropic and write investment brief",
             inject_chaos=False,
