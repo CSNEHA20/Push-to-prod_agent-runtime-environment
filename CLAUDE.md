@@ -104,3 +104,31 @@ New analytics engines follow the `arc_score.py` pattern: a plain class taking a 
 - Always use PROJECT.md as architectural reference.
 - Always update TODO.md after completing work.
 
+---
+
+## Git & Token Optimization Workflow
+
+### Git Review Protocol
+- Review only the `git diff`.
+- Ignore unchanged files.
+- Focus strictly on modified code.
+- Assume the rest of the repository is correct.
+
+### Milestone Iteration Loop
+```
+Repository
+    │
+PROJECT.md (architecture)
+    │
+TODO.md (roadmap)
+    │
+CLAUDE.md (rules)
+    │
+One milestone
+    │
+Git Commit
+    │
+Next milestone
+```
+
+

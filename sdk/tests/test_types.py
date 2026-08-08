@@ -24,7 +24,9 @@ from arc.types import (
     FirewallAction,
     RecoveryDiff,
     Checkpoint,
+    ReplayTimeline,
 )
+
 from api.schemas import (
     AgentSessionResponse,
     TraceStepResponse,

@@ -32,3 +32,17 @@ Only AFTER completing all 8 reviews and achieving complete understanding of the 
 15. Always use PROJECT.md as architectural reference.
 16. Always update TODO.md after completing work.
 
+# Git & Workflow Protocols
+
+### Git Review Protocol
+- Review only the `git diff`.
+- Ignore unchanged files.
+- Focus strictly on modified code.
+- Assume the rest of the repository is correct.
+
+### Milestone Iteration Loop
+```
+Repository -> PROJECT.md (architecture) -> TODO.md (roadmap) -> CLAUDE.md / AGENTS.md (rules) -> Single Milestone -> Git Commit -> Next Milestone
+```
+
+
