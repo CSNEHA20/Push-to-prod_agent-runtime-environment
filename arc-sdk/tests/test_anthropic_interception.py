@@ -437,14 +437,15 @@ class TestSyncCreate:
         assert "dashboard_url" in events[0].payload
 
     def test_verify_enforces_custom_rule(self) -> None:
-        arc = _arc()
+        # Empty response -> integrity verifier fails -> low, evidence-based confidence.
+        arc = _arc(FakeClient(reply=""))
         arc.messages.create(
             model="claude-sonnet-4-6", max_tokens=100,
             messages=[{"role": "user", "content": "x"}],
         )
         result = arc.verify(rules=[{"min_confidence": 0.99}])
         assert not result.is_valid
-        assert result.conflicts[0].conflict_type == "rule_confidence"
+        assert any(c.conflict_type == "rule_confidence" for c in result.conflicts)
 
     def test_betas_recorded_in_input_summary(self) -> None:
         arc = _arc()

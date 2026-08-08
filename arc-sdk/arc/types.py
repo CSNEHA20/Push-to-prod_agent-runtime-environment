@@ -55,6 +55,7 @@ class EventType(str, Enum):
     """Well-known runtime events emitted on the event bus."""
 
     PLAN_CREATED = "plan_created"
+    GRAPH_BUILT = "graph_built"
     STEP_RECORDED = "step_recorded"
     CHECKPOINT_CREATED = "checkpoint_created"
     VERIFICATION_FAILED = "verification_failed"
@@ -179,6 +180,40 @@ class VerificationResult(_Model):
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Verification metadata")
 
 
+class SanitizationAction(str, Enum):
+    """Action taken by a Prompt Firewall detector."""
+
+    NONE = "none"
+    REDACT = "redact"
+    DROP = "drop"
+    BLOCK = "block"
+    TRUNCATE = "truncate"
+    DEDUPLICATE = "deduplicate"
+
+
+class FirewallFinding(_Model):
+    """A threat, violation, or sanitization event detected by a firewall detector."""
+
+    detector_name: str = Field(..., description="Name of the detector")
+    category: str = Field(..., description="Detector category (e.g. prompt_injection, pii, secrets)")
+    severity: str = Field(default="medium", description="'low', 'medium', 'high', or 'critical'")
+    message: str = Field(..., description="Human-readable finding description")
+    location: str = Field(default="content", description="Input location (e.g. system, messages[0], tool_output)")
+    action_taken: SanitizationAction = Field(default=SanitizationAction.NONE, description="Action applied")
+    matched_text: Optional[str] = Field(default=None, description="Text segment that triggered the detector")
+
+
+class PromptFirewallResult(_Model):
+    """Complete result of inspecting and sanitizing prompt inputs before model dispatch."""
+
+    is_safe: bool = Field(..., description="True if no blocking threats were detected")
+    sanitized_payload: Dict[str, Any] = Field(default_factory=dict, description="Sanitized request payload")
+    sanitized_sources: List[Dict[str, Any]] = Field(default_factory=list, description="Sanitized context sources")
+    findings: List[FirewallFinding] = Field(default_factory=list, description="All detector findings")
+    conflicts: List[ConflictItem] = Field(default_factory=list, description="Detected context conflicts")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Execution metadata")
+
+
 class ReplayTimeline(_Model):
     """Ordered, replayable view of a recorded session."""
 
@@ -250,6 +285,40 @@ class Event(_Model):
     type: str = Field(..., description="Event type (see :class:`EventType`)")
     session_id: Optional[str] = Field(default=None, description="Associated session, if any")
     payload: Dict[str, Any] = Field(default_factory=dict, description="Event payload")
+
+
+class CircuitState(str, Enum):
+    """Lifecycle state of a per-subscriber circuit breaker."""
+
+    CLOSED = "closed"
+    OPEN = "open"
+    HALF_OPEN = "half_open"
+
+
+class DLQItem(_Model):
+    """An item retained in the Event Bus Dead Letter Queue after processing failure."""
+
+    dlq_id: str = Field(..., description="Unique DLQ entry identifier")
+    event: Event = Field(..., description="The original event that failed dispatch")
+    handler_name: str = Field(..., description="Name of the failed subscriber handler")
+    error: str = Field(..., description="Error message or exception description")
+    attempts: int = Field(default=1, description="Number of failure attempts")
+    failed_at: float = Field(..., description="Unix timestamp of permanent failure")
+
+
+class EventBusStats(_Model):
+    """Live performance metrics and health stats of the hardened event bus."""
+
+    events_emitted: int = Field(default=0, description="Total events emitted")
+    events_processed: int = Field(default=0, description="Total subscriber invocations completed")
+    failures: int = Field(default=0, description="Total subscriber invocation failures")
+    timeouts: int = Field(default=0, description="Total subscriber timeouts")
+    retries: int = Field(default=0, description="Total subscriber retry attempts")
+    dlq_size: int = Field(default=0, description="Current Dead Letter Queue size")
+    circuit_breakers: Dict[str, str] = Field(
+        default_factory=dict, description="Per-handler circuit breaker states ('closed', 'open', 'half_open')"
+    )
+
 
 
 # ---------------------------------------------------------------------------
@@ -335,10 +404,16 @@ __all__ = [
     "Session",
     "ConflictItem",
     "VerificationResult",
+    "SanitizationAction",
+    "FirewallFinding",
+    "PromptFirewallResult",
     "ReplayTimeline",
     "RecoveryPlan",
     "ExecutionPlan",
     "Event",
+    "CircuitState",
+    "DLQItem",
+    "EventBusStats",
     "RequestContext",
     "ResponseContext",
     "NextCall",

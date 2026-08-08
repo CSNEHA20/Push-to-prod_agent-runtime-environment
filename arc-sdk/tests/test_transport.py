@@ -162,13 +162,17 @@ def test_failure_is_recorded_and_reraised() -> None:
 
 
 def test_verify_enforces_rules() -> None:
-    arc = ARC(FakeClient(reply="ok."))  # short reply -> confidence ~0.6
+    from arc import AssertionVerifier
+
+    arc = ARC(FakeClient())  # complete reply -> integrity passes
+    # A failing assertion drags confidence below 1.0 — derived from evidence.
+    arc.verifier(AssertionVerifier({"mentions_spaceship": lambda text: "spaceship" in text}))
     arc.messages.create(model="m", max_tokens=100, messages=[{"role": "user", "content": "x"}])
-    passing = arc.verify()
-    assert passing.is_valid  # heuristic floor keeps text steps >= threshold
+    step = arc.trace()[0]
+    assert 0.0 < step.confidence_score < 1.0  # from verification, not wording
     failing = arc.verify(rules=[{"min_confidence": 0.9}])
     assert not failing.is_valid
-    assert failing.conflicts[0].conflict_type == "rule_confidence"
+    assert any(c.conflict_type == "rule_confidence" for c in failing.conflicts)
 
 
 def test_missing_client_raises_configuration_error() -> None:

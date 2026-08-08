@@ -31,7 +31,28 @@ from .exceptions import (
     ServerError,
     VerificationError,
 )
+from .runtime.graph import ExecutionGraph, ExecutionNode, GraphEventType, NodeKind
 from .runtime.planner import Planner
+from .runtime.verification import (
+    UNVERIFIED_CONFIDENCE,
+    VerificationCheck,
+    VerificationContext,
+    VerificationEngine,
+    VerificationReport,
+    Verifier,
+)
+from .runtime.verification.plugins import (
+    AssertionVerifier,
+    ExecutionResult,
+    ExecutionVerifier,
+    ExternalAPIVerifier,
+    JSONSchemaVerifier,
+    JudgeVerdict,
+    LLMJudgeVerifier,
+    PydanticVerifier,
+    ResponseIntegrityVerifier,
+    ToolOutputVerifier,
+)
 from .types import (
     Checkpoint,
     ConflictItem,
@@ -74,6 +95,10 @@ __all__ = [
     "RecoveryPlan",
     "Event",
     "ExecutionPlan",
+    "ExecutionGraph",
+    "ExecutionNode",
+    "NodeKind",
+    "GraphEventType",
     "RequestContext",
     "ResponseContext",
     "SessionStatus",
@@ -90,6 +115,23 @@ __all__ = [
     "Planner",
     "EventHandler",
     "Runnable",
+    # Verification Engine
+    "VerificationEngine",
+    "Verifier",
+    "VerificationContext",
+    "VerificationCheck",
+    "VerificationReport",
+    "UNVERIFIED_CONFIDENCE",
+    "ResponseIntegrityVerifier",
+    "JSONSchemaVerifier",
+    "PydanticVerifier",
+    "ToolOutputVerifier",
+    "ExternalAPIVerifier",
+    "LLMJudgeVerifier",
+    "JudgeVerdict",
+    "AssertionVerifier",
+    "ExecutionVerifier",
+    "ExecutionResult",
     # Exceptions
     "ARCError",
     "ConfigurationError",

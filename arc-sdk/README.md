@@ -18,11 +18,11 @@ guarantees:
 ## Install
 
 ```bash
-pip install arc-sdk
+pip install arc-agent-sdk
 
 # with a provider adapter
-pip install "arc-sdk[anthropic]"
-pip install "arc-sdk[all]"
+pip install "arc-agent-sdk[anthropic]"
+pip install "arc-agent-sdk[all]"
 ```
 
 ## Quickstart — intercept every Anthropic request
