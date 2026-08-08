@@ -82,6 +82,7 @@ class ARCRuntime:
                     agent_name=self.agent_name,
                     task=self.task,
                     session_id=self._session_id,
+                    session=self.db_session,
                 )
                 if agent_session and hasattr(agent_session, "session_id"):
                     self._session_id = agent_session.session_id
@@ -134,6 +135,7 @@ class ARCRuntime:
                     step_number=self.step_counter,
                     sources=context_sources,
                     task=self.task,
+                    db_session=self.db_session,
                 )
                 conflicts_found = len(firewall_res.get("conflicts", []))
                 filtered_context = firewall_res.get("final_context", "")

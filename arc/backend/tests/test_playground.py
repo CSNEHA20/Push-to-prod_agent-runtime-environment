@@ -6,24 +6,34 @@ import pytest
 import pytest_asyncio
 from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
-
+from sqlalchemy.pool import StaticPool
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 
-try:
-    from main import app
-    from db.database import Base
-    from demo.chaos_injector import ChaosInjector
-    from demo.demo_agent import run_demo_agent, search_funding_information
-except ImportError:
-    from arc.backend.main import app
-    from arc.backend.db.database import Base
-    from arc.demo.chaos_injector import ChaosInjector
-    from arc.demo.demo_agent import run_demo_agent, search_funding_information
+import sys
+from pathlib import Path
+
+# Add project root and arc root to sys.path
+root_dir = Path(__file__).resolve().parent.parent.parent.parent
+arc_dir = Path(__file__).resolve().parent.parent.parent
+backend_dir = Path(__file__).resolve().parent.parent
+
+for d in [str(backend_dir), str(arc_dir), str(root_dir)]:
+    if d not in sys.path:
+        sys.path.insert(0, d)
+
+from db.database import Base
+import models.session
+import models.trace
+import models.checkpoint
+import models.context
+from main import app
+from demo.chaos_injector import ChaosInjector
+from demo.demo_agent import run_demo_agent, search_funding_information
 
 
 @pytest_asyncio.fixture
 async def async_db():
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", poolclass=StaticPool, echo=False)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 

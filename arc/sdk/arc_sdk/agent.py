@@ -237,6 +237,37 @@ class ARCAgent:
             return str(res.content)
         return str(res)
 
+    async def acall_claude(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        context_sources: Optional[List[Dict[str, Any]]] = None,
+    ) -> str:
+        """
+        Asynchronously calls Claude API via ARC Runtime.
+        """
+        if self._runtime:
+            try:
+                return await self._runtime.call_claude(
+                    messages=messages,
+                    tools=tools,
+                    context_sources=context_sources,
+                )
+            except Exception as e:
+                if "invalid x-api-key" in str(e).lower() or "401" in str(e) or "AuthenticationError" in type(e).__name__:
+                    logger.warning(f"Anthropic API key invalid/unauthorized: {e}. Falling back to Mock client.")
+                    self.anthropic_client = MockAnthropicClient()
+                    self._runtime.anthropic_client = self.anthropic_client
+                    self._runtime.context_firewall.client = self.anthropic_client
+                    return await self._runtime.call_claude(
+                        messages=messages,
+                        tools=tools,
+                        context_sources=context_sources,
+                    )
+                raise e
+
+        return self.call_claude(messages=messages, tools=tools, context_sources=context_sources)
+
     def run_tool(
         self,
         tool_name: str,

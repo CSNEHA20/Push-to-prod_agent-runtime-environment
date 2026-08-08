@@ -256,5 +256,12 @@ class ContextFirewall:
                 await db.commit()
         except Exception as e:
             logger.error(f"Failed to save ContextLog to DB for session {parsed_session_id}: {e}")
+            try:
+                if db_session:
+                    await db_session.rollback()
+                elif self._db_session:
+                    await self._db_session.rollback()
+            except Exception:
+                pass
 
         return result

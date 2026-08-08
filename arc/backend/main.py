@@ -73,6 +73,7 @@ try:
     from api.routes.context import router as context_router
     from api.routes.recovery import router as recovery_router
     from api.routes.playground import router as playground_router
+    from api.routes.features import router as features_router
     from api.websocket import router as ws_router
 except ImportError:
     from arc.backend.api.routes.sessions import router as sessions_router
@@ -80,6 +81,7 @@ except ImportError:
     from arc.backend.api.routes.context import router as context_router
     from arc.backend.api.routes.recovery import router as recovery_router
     from arc.backend.api.routes.playground import router as playground_router
+    from arc.backend.api.routes.features import router as features_router
     from arc.backend.api.websocket import router as ws_router
 
 app.include_router(sessions_router)
@@ -87,6 +89,7 @@ app.include_router(traces_router)
 app.include_router(context_router)
 app.include_router(recovery_router)
 app.include_router(playground_router)
+app.include_router(features_router)
 app.include_router(ws_router)
 
 @app.get("/")
