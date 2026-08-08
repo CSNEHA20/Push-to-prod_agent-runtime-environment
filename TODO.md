@@ -123,3 +123,54 @@ This document details the granular, ordered development milestones for convertin
 - **Goal**: Render visual JSON side-by-side state diffs for failure recoveries.
 - **Test**: Browser UI verification.
 - **Success Criteria**: Interactive diff highlights added, modified, and removed state keys.
+
+---
+
+## Phase 0: Public SDK Facade Scaffold
+
+### M0.1: Scaffold `arc-sdk` Package Structure [COMPLETED]
+- **Files**: `arc-sdk/` (new): `pyproject.toml`, `arc/__init__.py`, `arc/_facade.py`, `arc/config.py`, `arc/types.py`, `arc/exceptions.py`, `arc/version.py`, `arc/py.typed`, `arc/runtime/*`, `arc/integrations/*`, `arc/mcp/`, `arc/cli/`, `examples/`, `tests/`, `docs/`.
+- **Goal**: Ship the production public API surface (structure only, no runtime internals): the `ARC()` facade exposing `wrap`, `run`, `trace`, `recover`, `verify`, `replay`, `inspect`, `middleware`, `plugin`, `event`; typed data contracts; modular engine interfaces; PEP 561 typing; packaging + entry point; examples + docs.
+- **Test**: `cd arc-sdk && pytest` (10 passing contract tests over exports, method presence, registration wiring, and scaffolded `NotImplementedError` behaviour).
+- **Success Criteria**: `import arc` exposes the full facade; extension-point registration works; execution methods declare typed contracts and raise `NotImplementedError`.
+- **DECISION [RESOLVED]**: `arc-sdk/` (per PROJECT.md §4) is the **canonical** SDK going forward. Runtime internals will be ported from the legacy `sdk/arc` into `arc-sdk/arc`, and `sdk/` will be retired. Migration tracked in M0.2–M0.6 below.
+
+### M0.2: Real ARC Runtime Transport (Anthropic interception) [COMPLETED]
+- **Files**: `arc-sdk/arc/_transport.py` (new), `arc-sdk/arc/_runtime.py` (new), `arc-sdk/arc/runtime/{recorder,firewall,verifier,recovery,events,middleware}/default.py` (new), `arc-sdk/arc/runtime/replay/__init__.py` (new), `arc-sdk/arc/_facade.py`, `arc-sdk/arc/config.py`, `arc-sdk/tests/{conftest,test_transport}.py`.
+- **Goal**: `ARC(client)` transparently intercepts every Anthropic request. `arc.messages.create(...)` / `arc.messages.stream(...)` (and `arc.beta.messages.*` for MCP) run through the real pipeline — Middleware → Context Firewall → Event Bus → Flight Recorder → Verification → Recovery → Anthropic SDK → Replay Store → Dashboard — and return the SDK response object **unchanged**. Streaming, tool calls, extended thinking, MCP, request metadata, and SDK-owned retries all pass through untouched; non-intercepted resource methods (`count_tokens`, etc.) pass straight through.
+- **Non-goals (deferred)**: `wrap()`/`run()` (M0.3); async client interception; remote control-plane persistence (M0.5). No mock transport — the transport is real and duck-typed (no hard `anthropic` dependency).
+- **Test**: `cd arc-sdk && pytest` (25 passing: kwargs-untouched forwarding, response passthrough, recording/trace, tool/stream/beta-MCP handling, middleware + event dispatch, failure recording + recovery plan, rule-based verification).
+- **Success Criteria**: `from arc import ARC; arc = ARC(Anthropic()); arc.messages.create(...)` works with everything else automatic; provider payloads and responses are never mutated.
+
+### M0.3: Port Agent Protection into `wrap`/`run` [COMPLETED]
+- **Files**: `arc-sdk/arc/_agent.py` (new), `arc-sdk/arc/_runtime.py` (extended),
+  `arc-sdk/arc/_facade.py` (wrap/run implemented), `arc-sdk/arc/integrations/anthropic/wrapper.py` (new),
+  `arc-sdk/arc/integrations/langgraph/wrapper.py` (new), `arc-sdk/arc/integrations/crewai/wrapper.py` (new),
+  `arc-sdk/arc/integrations/autogen/wrapper.py` (new), `arc-sdk/arc/integrations/openhands/wrapper.py` (new),
+  `arc-sdk/arc/integrations/openai/wrapper.py` (new), `arc-sdk/tests/test_wrap_run.py` (new).
+- **Goal**: `ARC.wrap(agent)` returns a `WrappedAgent` proxy preserving the original API.
+  ARC automatically intercepts execution, records runtime, injects middleware, manages context,
+  verifies outputs, recovers failures, and emits events.
+  Supported: Anthropic SDK, LangGraph, CrewAI, AutoGen, OpenHands, OpenAI Agents SDK, Generic Python.
+- **Test**: `cd arc-sdk && pytest tests/test_wrap_run.py` — 44 passing.
+  Full suite: `cd arc-sdk && pytest` — 69 passing, 0 failed.
+- **Success Criteria**: Wrapping any agent records steps; `wrapped.arc_trace()` returns
+  flight-recorder history; failures are recorded and recovery plans generated; async agents work.
+
+### M0.4: Wire Middleware Pipeline & Event Bus Dispatch
+- **Files**: `arc-sdk/arc/runtime/middleware/`, `arc-sdk/arc/runtime/events/`, `arc-sdk/arc/_facade.py`.
+- **Goal**: Implement `MiddlewarePipeline.execute` (onion chain) and `EventBus.emit` so registered middleware/handlers actually run around each step.
+- **Test**: `cd arc-sdk && pytest tests/test_pipeline.py`.
+- **Success Criteria**: Registered middleware observes requests/responses; emitted events reach subscribers.
+
+### M0.5: Point Distribution `arc-sdk` at Canonical Package
+- **Files**: `sdk/` (retire), root packaging / editable install.
+- **Goal**: Re-install `arc-sdk` editable from `arc-sdk/`, remove the legacy `sdk/arc` editable install so `import arc` resolves to the canonical package.
+- **Test**: `python -c "import arc, inspect, os; assert 'arc-sdk' in os.path.dirname(inspect.getfile(arc))"`.
+- **Success Criteria**: Single source of truth; the "two SDK copies" gotcha is eliminated.
+
+### M0.6: Migrate & Consolidate Legacy SDK Tests
+- **Files**: `arc-sdk/tests/` (from `sdk/tests/`).
+- **Goal**: Port `sdk/tests` coverage onto the canonical package and delete duplicates.
+- **Test**: `cd arc-sdk && pytest`.
+- **Success Criteria**: Full legacy behaviour covered by the canonical suite before `sdk/` deletion.
