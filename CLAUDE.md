@@ -14,7 +14,21 @@ ARC (Agent Runtime Core) is a reliability layer that sits between an application
 
 The "wow" features (`core/arc_predict.py`, `arc_score.py`, `arc_diff.py`, `arc_lens.py`) are separate analytics layers over recorded sessions, exposed via `api/routes/features.py`. They operate on plain session dicts, not the ORM models directly.
 
+## Modular Architectural Documentation
+
+To inspect specific subsystems without rescanning the repository or loading large files, read the corresponding modular specification:
+
+- **Architecture**: Read [ARCHITECTURE.md](file:///c:/Users/Lenovo/Downloads/agent-runtime-core/ARCHITECTURE.md)
+- **APIs**: Read [API.md](file:///c:/Users/Lenovo/Downloads/agent-runtime-core/API.md)
+- **Runtime Engines**: Read [RUNTIME.md](file:///c:/Users/Lenovo/Downloads/agent-runtime-core/RUNTIME.md)
+- **SDK Reference**: Read [SDK.md](file:///c:/Users/Lenovo/Downloads/agent-runtime-core/SDK.md)
+- **CLI Commands**: Read [CLI.md](file:///c:/Users/Lenovo/Downloads/agent-runtime-core/CLI.md)
+- **Master Plan & Milestones**: Read [PROJECT.md](file:///c:/Users/Lenovo/Downloads/agent-runtime-core/PROJECT.md) and [TODO.md](file:///c:/Users/Lenovo/Downloads/agent-runtime-core/TODO.md)
+
+---
+
 ## Repository layout
+
 
 - `arc/backend/` — FastAPI service (the core product). Everything below is relative to here.
   - `core/` — the three engines + runtime + wow-feature analyzers
