@@ -287,6 +287,40 @@ class Event(_Model):
     payload: Dict[str, Any] = Field(default_factory=dict, description="Event payload")
 
 
+class CircuitState(str, Enum):
+    """Lifecycle state of a per-subscriber circuit breaker."""
+
+    CLOSED = "closed"
+    OPEN = "open"
+    HALF_OPEN = "half_open"
+
+
+class DLQItem(_Model):
+    """An item retained in the Event Bus Dead Letter Queue after processing failure."""
+
+    dlq_id: str = Field(..., description="Unique DLQ entry identifier")
+    event: Event = Field(..., description="The original event that failed dispatch")
+    handler_name: str = Field(..., description="Name of the failed subscriber handler")
+    error: str = Field(..., description="Error message or exception description")
+    attempts: int = Field(default=1, description="Number of failure attempts")
+    failed_at: float = Field(..., description="Unix timestamp of permanent failure")
+
+
+class EventBusStats(_Model):
+    """Live performance metrics and health stats of the hardened event bus."""
+
+    events_emitted: int = Field(default=0, description="Total events emitted")
+    events_processed: int = Field(default=0, description="Total subscriber invocations completed")
+    failures: int = Field(default=0, description="Total subscriber invocation failures")
+    timeouts: int = Field(default=0, description="Total subscriber timeouts")
+    retries: int = Field(default=0, description="Total subscriber retry attempts")
+    dlq_size: int = Field(default=0, description="Current Dead Letter Queue size")
+    circuit_breakers: Dict[str, str] = Field(
+        default_factory=dict, description="Per-handler circuit breaker states ('closed', 'open', 'half_open')"
+    )
+
+
+
 # ---------------------------------------------------------------------------
 # Structural interfaces (contracts for extension points)
 # ---------------------------------------------------------------------------
@@ -377,6 +411,9 @@ __all__ = [
     "RecoveryPlan",
     "ExecutionPlan",
     "Event",
+    "CircuitState",
+    "DLQItem",
+    "EventBusStats",
     "RequestContext",
     "ResponseContext",
     "NextCall",

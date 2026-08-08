@@ -1,14 +1,15 @@
-"""Event broker & pub/sub dispatcher (interface only).
-
-Re-exports the :class:`~arc.types.EventHandler` contract and declares the event
-bus interface backing :meth:`arc.ARC.event`.
-"""
+"""Event broker & pub/sub dispatcher."""
 
 from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
-from ...types import Event, EventHandler
+from arc.types import Event, EventBusStats, EventHandler
+from .circuit_breaker import CircuitBreaker, CircuitBreakerRegistry
+from .default import DefaultEventBus
+from .dlq import DeadLetterQueue
+from .hardened import HardenedEventBus
+from .metrics import EventBusMetrics
 
 
 @runtime_checkable
@@ -24,4 +25,14 @@ class EventBus(Protocol):
         ...
 
 
-__all__ = ["Event", "EventHandler", "EventBus"]
+__all__ = [
+    "Event",
+    "EventHandler",
+    "EventBus",
+    "HardenedEventBus",
+    "DefaultEventBus",
+    "CircuitBreaker",
+    "CircuitBreakerRegistry",
+    "DeadLetterQueue",
+    "EventBusMetrics",
+]

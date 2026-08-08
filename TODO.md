@@ -196,3 +196,10 @@ This document details the granular, ordered development milestones for convertin
 - **Test**: `cd arc-sdk && python -m pytest` (**202 total passing**).
 - **Success Criteria**: Sanitized payload reaches provider dispatch; PII & Secrets redacted; prompt injection/jailbreak/leakage neutralized; duplicate context deduplicated; 202 tests green.
 
+### M0.10: Hardened Event Bus [COMPLETED]
+- **Files**: `arc-sdk/arc/runtime/events/hardened.py` (new), `arc-sdk/arc/runtime/events/circuit_breaker.py` (new), `arc-sdk/arc/runtime/events/dlq.py` (new), `arc-sdk/arc/runtime/events/metrics.py` (new), `arc-sdk/arc/runtime/events/default.py`, `arc-sdk/arc/runtime/events/__init__.py`, `arc-sdk/arc/types.py`, `arc-sdk/tests/test_hardened_event_bus.py`.
+- **Goal**: Implemented resilient Hardened Event Bus providing complete Fault Isolation (subscribers can never crash model execution), Timeouts (per-subscriber execution limits), Retries (exponential backoff), Async Dispatch (non-blocking task dispatch), Backpressure (bounded queues), Dead Letter Queue (DLQ for permanently failed event subscriber dispatches), Circuit Breakers (per-subscriber trip states `CLOSED`, `OPEN`, `HALF_OPEN`), and live Metrics (`EventBusStats`).
+- **Test**: `cd arc-sdk && python -m pytest` (**208 total passing**).
+- **Success Criteria**: Bad, crashing, slow, or hanging subscribers never affect model execution or break runtime flow; DLQ captures permanent failures; 208 tests green.
+
+
