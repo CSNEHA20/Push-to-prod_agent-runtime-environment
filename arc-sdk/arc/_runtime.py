@@ -21,6 +21,8 @@ from .config import ARCConfig
 from .runtime.events.default import DefaultEventBus
 from .runtime.firewall.default import ContextFirewall
 from .runtime.middleware.default import MiddlewarePipeline
+from .runtime.planner import Planner
+from .runtime.planner.default import AdaptivePlanner, make_planner_middleware
 from .runtime.recorder.default import FlightRecorder
 from .runtime.recovery.default import RecoveryEngine
 from .runtime.replay import DefaultReplayStore
@@ -29,12 +31,18 @@ from .types import (
     Event,
     EventHandler,
     EventType,
+    ExecutionPlan,
     Middleware,
+    RecoveryPolicy,
     RequestContext,
     ResponseContext,
     StepType,
     TraceStep,
+    VerificationResult,
+    VerificationStrategy,
 )
+
+_STRICT_MIN_CONFIDENCE = 0.7
 
 Invoke = Callable[[Dict[str, Any]], Any]
 
@@ -94,6 +102,7 @@ class ARCRuntime:
         *,
         get_middleware: Callable[[], List[Middleware]],
         get_handlers: Callable[[str], List[EventHandler]],
+        planner: Optional[Planner] = None,
     ) -> None:
         self.config = config
         self.session_id = str(uuid.uuid4())
@@ -102,7 +111,12 @@ class ARCRuntime:
         self.recovery = RecoveryEngine()
         self.verifier = ConfidenceVerifier(config.confidence_threshold)
         self.events = DefaultEventBus(get_handlers)
-        self.pipeline = MiddlewarePipeline(get_middleware)
+        self.planner: Planner = planner or AdaptivePlanner(config)
+        self._stream_plans: Dict[int, ExecutionPlan] = {}
+        # The Adaptive Planner is the first (outermost) middleware; user
+        # middleware runs inside it, so everything follows the plan.
+        planner_mw = make_planner_middleware(lambda: self.planner, self.events.emit)
+        self.pipeline = MiddlewarePipeline(lambda: [planner_mw, *get_middleware()])
         self.replay = DefaultReplayStore(self.recorder, self.recovery, config.confidence_threshold)
 
     @property
@@ -167,23 +181,34 @@ class ARCRuntime:
         invoke: Invoke,
     ) -> ResponseContext:
         text, usage, tools, stop_reason = extract_response(raw)
+        plan: Optional[ExecutionPlan] = req.metadata.get("execution_plan")
         step = self.recorder.record(
             self.recorder.build_step(
                 req.session_id,
                 step_number,
                 name=f"messages.create ({req.payload.get('model', '?')})",
-                input_data=input_summary,
+                input_data={**input_summary, "plan": plan.to_dict() if plan else None},
                 output_text=text,
                 output_data={"tools": tools, "stop_reason": stop_reason},
                 token_usage=usage,
                 latency_ms=latency,
             )
         )
-        result = self.verifier.verify([step])
-        if not result.is_valid and self.config.auto_recover and not req.metadata.get("_arc_retry"):
-            self._emit_recovery(req.session_id, step_number)
-            retry = req.model_copy(update={"metadata": {**req.metadata, "_arc_retry": True}})
-            return self._core(retry, invoke, streaming=False)
+        result = self._verify_with_plan([step], plan)
+        if not result.is_valid:
+            self.events.emit(
+                Event(
+                    type=EventType.VERIFICATION_FAILED.value,
+                    session_id=req.session_id,
+                    payload={"step_number": step_number, "conflicts": len(result.conflicts)},
+                )
+            )
+            if self._retry_allowed(plan, req):
+                self._emit_recovery(req.session_id, step_number)
+                retry = req.model_copy(update={"metadata": {**req.metadata, "_arc_retry": True}})
+                return self._core(retry, invoke, streaming=False)
+            if self._checkpoint_recovery(plan):
+                self._emit_recovery(req.session_id, step_number)
         self._emit_recorded(req.session_id, step)
         return ResponseContext(
             session_id=req.session_id,
@@ -225,9 +250,28 @@ class ARCRuntime:
     def begin_stream(
         self, payload: Dict[str, Any], context_sources: Optional[List[Dict[str, Any]]]
     ) -> int:
-        """Run the pre-dispatch stages for a stream and return its step number."""
+        """Plan the stream and run its pre-dispatch stages; return its step number.
+
+        Streams bypass the middleware onion, so the planner is invoked directly
+        here to honour "plan before every request reaches the model".
+        """
         step_number = self.recorder.next_step_number(self.session_id)
-        _, conflicts = self.firewall.filter(list(context_sources or []))
+        request = RequestContext(
+            session_id=self.session_id,
+            provider=self.config.provider,
+            payload=payload,
+            context_sources=list(context_sources or []),
+        )
+        plan = self.planner.plan(request)
+        self._stream_plans[step_number] = plan
+        self.events.emit(
+            Event(
+                type=EventType.PLAN_CREATED.value,
+                session_id=self.session_id,
+                payload=plan.to_dict(),
+            )
+        )
+        _, conflicts = self.firewall.filter(request.context_sources)
         self.events.emit(
             Event(
                 type="request_started",
@@ -247,7 +291,8 @@ class ARCRuntime:
         error: Optional[str],
     ) -> TraceStep:
         """Run the post-dispatch stages for a stream once it has completed."""
-        input_summary = self._input_summary(payload)
+        plan = self._stream_plans.pop(step_number, None)
+        input_summary = {**self._input_summary(payload), "plan": plan.to_dict() if plan else None}
         if error is not None:
             return self._record_failure(
                 self.session_id, step_number, input_summary, error, latency_ms
@@ -265,9 +310,47 @@ class ARCRuntime:
                 latency_ms=latency_ms,
             )
         )
-        self.verifier.verify([step])
+        # Streams can't be re-invoked mid-flight, so recovery here is record-only.
+        result = self._verify_with_plan([step], plan)
+        if not result.is_valid:
+            self.events.emit(
+                Event(
+                    type=EventType.VERIFICATION_FAILED.value,
+                    session_id=self.session_id,
+                    payload={"step_number": step_number, "conflicts": len(result.conflicts)},
+                )
+            )
         self._emit_recorded(self.session_id, step)
         return step
+
+    # -- plan-following helpers ------------------------------------------
+
+    def _verify_with_plan(
+        self, trace: List[TraceStep], plan: Optional[ExecutionPlan]
+    ) -> VerificationResult:
+        strategy = plan.verification_strategy if plan else VerificationStrategy.STANDARD
+        if strategy == VerificationStrategy.SKIP:
+            return VerificationResult(
+                is_valid=True, firewall_status="skipped", metadata={"skipped": True}
+            )
+        rules = (
+            [{"min_confidence": _STRICT_MIN_CONFIDENCE}]
+            if strategy == VerificationStrategy.STRICT
+            else None
+        )
+        return self.verifier.verify(trace, rules)
+
+    @staticmethod
+    def _retry_allowed(plan: Optional[ExecutionPlan], req: RequestContext) -> bool:
+        if req.metadata.get("_arc_retry"):
+            return False
+        if plan is not None:
+            return plan.recovery_policy == RecoveryPolicy.RETRY_ONCE
+        return False
+
+    @staticmethod
+    def _checkpoint_recovery(plan: Optional[ExecutionPlan]) -> bool:
+        return plan is not None and plan.recovery_policy == RecoveryPolicy.CHECKPOINT
 
     # -- helpers ----------------------------------------------------------
 

@@ -31,24 +31,31 @@ from .exceptions import (
     ServerError,
     VerificationError,
 )
+from .runtime.planner import Planner
 from .types import (
     Checkpoint,
     ConflictItem,
     Event,
     EventHandler,
     EventType,
+    ExecutionPlan,
     Middleware,
     Plugin,
+    ReasoningStrategy,
     RecoveryPlan,
+    RecoveryPolicy,
     ReplayTimeline,
     RequestContext,
     ResponseContext,
+    RetrievalStrategy,
     Runnable,
     Session,
     SessionStatus,
     StepType,
+    ToolStrategy,
     TraceStep,
     VerificationResult,
+    VerificationStrategy,
 )
 from .version import __version__
 
@@ -66,14 +73,21 @@ __all__ = [
     "ReplayTimeline",
     "RecoveryPlan",
     "Event",
+    "ExecutionPlan",
     "RequestContext",
     "ResponseContext",
     "SessionStatus",
     "StepType",
     "EventType",
+    "ReasoningStrategy",
+    "RetrievalStrategy",
+    "ToolStrategy",
+    "VerificationStrategy",
+    "RecoveryPolicy",
     # Extension-point interfaces
     "Middleware",
     "Plugin",
+    "Planner",
     "EventHandler",
     "Runnable",
     # Exceptions

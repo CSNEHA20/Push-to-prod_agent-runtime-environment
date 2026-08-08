@@ -23,12 +23,15 @@ from ._transport import _MessagesProxy, _NamespaceProxy
 from .config import ARCConfig
 from .exceptions import ConfigurationError
 from .integrations.anthropic.wrapper import AnthropicClientWrapper
+from .runtime.planner import Planner
 from .types import (
     EventHandler,
+    ExecutionPlan,
     Middleware,
     Plugin,
     RecoveryPlan,
     ReplayTimeline,
+    RequestContext,
     Runnable,
     Session,
     SessionStatus,
@@ -67,6 +70,7 @@ class ARC:
         server_url: Optional[str] = None,
         dashboard_url: Optional[str] = None,
         config: Optional[ARCConfig] = None,
+        planner: Optional[Planner] = None,
         **options: Any,
     ) -> None:
         self._provider_client = client
@@ -84,6 +88,7 @@ class ARC:
             self._config,
             get_middleware=lambda: list(self._middleware),
             get_handlers=lambda name: list(self._event_handlers.get(name, [])),
+            planner=planner,
         )
 
     # -- transport interception ------------------------------------------
@@ -119,6 +124,30 @@ class ARC:
     def config(self) -> ARCConfig:
         """The resolved, immutable configuration for this instance."""
         return self._config
+
+    @property
+    def planner(self) -> Planner:
+        """The Adaptive Planner — the first middleware. Assignable to swap it."""
+        return self._runtime.planner
+
+    @planner.setter
+    def planner(self, planner: Planner) -> None:
+        self._runtime.planner = planner
+
+    def plan(self, **request: Any) -> ExecutionPlan:
+        """Preview the execution plan for a request without calling the model.
+
+        Accepts the same generic request kwargs as ``messages.create`` (plus an
+        optional ``arc_context_sources``); no provider-specific keys are required.
+        """
+        context_sources = request.pop("arc_context_sources", None) or []
+        ctx = RequestContext(
+            session_id=self.session_id,
+            provider=self._config.provider,
+            payload=request,
+            context_sources=list(context_sources),
+        )
+        return self._runtime.planner.plan(ctx)
 
     @property
     def middlewares(self) -> List[Middleware]:

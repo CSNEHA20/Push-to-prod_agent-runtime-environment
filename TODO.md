@@ -157,10 +157,10 @@ This document details the granular, ordered development milestones for convertin
 - **Success Criteria**: Wrapping any agent records steps; `wrapped.arc_trace()` returns
   flight-recorder history; failures are recorded and recovery plans generated; async agents work.
 
-### M0.4: Wire Middleware Pipeline & Event Bus Dispatch
-- **Files**: `arc-sdk/arc/runtime/middleware/`, `arc-sdk/arc/runtime/events/`, `arc-sdk/arc/_facade.py`.
+### M0.4: Wire Middleware Pipeline & Event Bus Dispatch [COMPLETED]
+- **Files**: `arc-sdk/arc/runtime/middleware/default.py`, `arc-sdk/arc/runtime/events/default.py`, `arc-sdk/arc/_runtime.py`.
 - **Goal**: Implement `MiddlewarePipeline.execute` (onion chain) and `EventBus.emit` so registered middleware/handlers actually run around each step.
-- **Test**: `cd arc-sdk && pytest tests/test_pipeline.py`.
+- **Test**: covered by `tests/test_transport.py::test_middleware_runs_in_pipeline` / `::test_events_dispatched` (delivered with M0.2).
 - **Success Criteria**: Registered middleware observes requests/responses; emitted events reach subscribers.
 
 ### M0.5: Point Distribution `arc-sdk` at Canonical Package
@@ -174,3 +174,10 @@ This document details the granular, ordered development milestones for convertin
 - **Goal**: Port `sdk/tests` coverage onto the canonical package and delete duplicates.
 - **Test**: `cd arc-sdk && pytest`.
 - **Success Criteria**: Full legacy behaviour covered by the canonical suite before `sdk/` deletion.
+
+### M0.7: Adaptive Planner (first middleware) [COMPLETED]
+- **Files**: `arc-sdk/arc/runtime/planner/__init__.py` + `default.py` (new), `arc-sdk/arc/types.py` (ExecutionPlan + strategy enums + `plan_created` event), `arc-sdk/arc/_runtime.py`, `arc-sdk/arc/_facade.py`, `arc-sdk/arc/__init__.py`, `arc-sdk/tests/test_planner.py`, `arc-sdk/examples/05_adaptive_planner.py`.
+- **Goal**: Before every request reaches the model, ARC produces a provider-independent `ExecutionPlan` (reasoning strategy, thinking budget, context budget, retrieval strategy, tool strategy, verification strategy, recovery policy). The `AdaptivePlanner` is installed as the **first (outermost) middleware**; it stores the plan on the request and emits `plan_created`. Downstream stages follow it — ARC enforces `verification_strategy` (skip/standard/strict) and `recovery_policy` (none/checkpoint/retry_once) directly; the remaining strategies are recorded on the step and surfaced via events for provider adapters/middleware to apply. Streams are planned too (planner invoked directly, since streams bypass the onion). Planner is swappable (`ARC(planner=...)` / `arc.planner = ...`) and previewable (`arc.plan(**request)`).
+- **Provider independence**: the planner reads only cross-provider signals (`messages`, `tools`, `max_tokens`, ARC `context_sources`) and never emits provider-specific request keys; `RETRY_ONCE` is chosen only when `auto_recover` is enabled (a retry re-bills the model).
+- **Test**: `cd arc-sdk && pytest` (16 new planner tests; 85 total passing) — heuristic mappings, thinking-budget cap, retrieval scaling, first-middleware ordering, `plan_created` event, plan-driven retry vs checkpoint, streaming planned, custom/swappable planner.
+- **Success Criteria**: `arc.plan(...)` returns a full plan without a model call; the plan governs verification + recovery on every intercepted request.

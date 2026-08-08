@@ -54,11 +54,57 @@ class StepType(str, Enum):
 class EventType(str, Enum):
     """Well-known runtime events emitted on the event bus."""
 
+    PLAN_CREATED = "plan_created"
     STEP_RECORDED = "step_recorded"
     CHECKPOINT_CREATED = "checkpoint_created"
     VERIFICATION_FAILED = "verification_failed"
     RECOVERY_TRIGGERED = "recovery_triggered"
     SESSION_COMPLETED = "session_completed"
+
+
+# ---------------------------------------------------------------------------
+# Adaptive-planner strategy vocabulary (provider-independent)
+# ---------------------------------------------------------------------------
+
+
+class ReasoningStrategy(str, Enum):
+    """How much deliberate reasoning the request warrants."""
+
+    DIRECT = "direct"          # answer immediately, no scratch reasoning
+    STEP_BY_STEP = "step_by_step"  # moderate, structured reasoning
+    EXTENDED = "extended"      # deep, long-horizon reasoning
+
+
+class RetrievalStrategy(str, Enum):
+    """How aggressively context should be retrieved/augmented."""
+
+    NONE = "none"
+    LIGHT = "light"
+    AGGRESSIVE = "aggressive"
+
+
+class ToolStrategy(str, Enum):
+    """How tools should be offered to the model."""
+
+    NONE = "none"
+    AUTO = "auto"          # model decides
+    PARALLEL = "parallel"  # encourage concurrent tool calls
+
+
+class VerificationStrategy(str, Enum):
+    """How strictly the recorded response is verified."""
+
+    SKIP = "skip"
+    STANDARD = "standard"
+    STRICT = "strict"
+
+
+class RecoveryPolicy(str, Enum):
+    """What to do when a step fails verification."""
+
+    NONE = "none"                    # record only
+    CHECKPOINT = "checkpoint"        # checkpoint + surface a recovery plan
+    RETRY_ONCE = "retry_once"        # re-invoke the provider once
 
 
 # ---------------------------------------------------------------------------
@@ -159,6 +205,45 @@ class RecoveryPlan(_Model):
     )
 
 
+class ExecutionPlan(_Model):
+    """A provider-independent plan for a single request.
+
+    Produced by the Adaptive Planner (the first middleware) before the request
+    reaches the model. Downstream stages follow it: ARC enforces
+    ``verification_strategy`` and ``recovery_policy`` directly, and exposes the
+    remaining strategies (reasoning/thinking/context/retrieval/tool) on the
+    request and via the ``plan_created`` event for provider adapters and
+    downstream middleware to apply. The plan never contains provider-specific
+    request keys.
+    """
+
+    reasoning_strategy: ReasoningStrategy = Field(
+        default=ReasoningStrategy.DIRECT, description="Depth of deliberate reasoning"
+    )
+    thinking_budget: int = Field(
+        default=0, description="Abstract token budget for reasoning (0 = none)"
+    )
+    context_budget: int = Field(
+        default=0, description="Abstract token budget for injected context"
+    )
+    retrieval_strategy: RetrievalStrategy = Field(
+        default=RetrievalStrategy.NONE, description="Context retrieval aggressiveness"
+    )
+    tool_strategy: ToolStrategy = Field(
+        default=ToolStrategy.NONE, description="How tools are offered to the model"
+    )
+    verification_strategy: VerificationStrategy = Field(
+        default=VerificationStrategy.STANDARD, description="Response verification strictness"
+    )
+    recovery_policy: RecoveryPolicy = Field(
+        default=RecoveryPolicy.CHECKPOINT, description="Action on verification failure"
+    )
+    rationale: str = Field(default="", description="Why the planner chose this plan")
+    signals: Dict[str, Any] = Field(
+        default_factory=dict, description="Provider-independent signals the plan derived from"
+    )
+
+
 class Event(_Model):
     """An event dispatched on the ARC runtime event bus."""
 
@@ -240,6 +325,11 @@ __all__ = [
     "SessionStatus",
     "StepType",
     "EventType",
+    "ReasoningStrategy",
+    "RetrievalStrategy",
+    "ToolStrategy",
+    "VerificationStrategy",
+    "RecoveryPolicy",
     "TraceStep",
     "Checkpoint",
     "Session",
@@ -247,6 +337,7 @@ __all__ = [
     "VerificationResult",
     "ReplayTimeline",
     "RecoveryPlan",
+    "ExecutionPlan",
     "Event",
     "RequestContext",
     "ResponseContext",

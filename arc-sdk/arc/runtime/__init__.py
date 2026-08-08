@@ -22,6 +22,7 @@ from __future__ import annotations
 from .events import EventBus
 from .firewall import Firewall
 from .middleware import MiddlewarePipeline
+from .planner import Planner
 from .plugins import PluginRegistry
 from .recorder import Recorder
 from .recovery import RecoveryEngine
@@ -35,6 +36,7 @@ __all__ = [
     "Verifier",
     "Firewall",
     "Recorder",
+    "Planner",
     "PluginRegistry",
     "MiddlewarePipeline",
     "EventBus",
