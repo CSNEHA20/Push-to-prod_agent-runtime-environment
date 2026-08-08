@@ -68,3 +68,25 @@ python demo_agent.py
 ## Adding a feature engine or route
 
 New analytics engines follow the `arc_score.py` pattern: a plain class taking a session dict, instantiated once at module load in `api/routes/features.py`, exposed as a route under the `/api/sessions` prefix. New ORM models must be imported in `models/__init__.py` so `Base.metadata.create_all` picks them up.
+
+---
+
+## ARC Development Rules
+
+- Understand before implementing.
+- Never rewrite existing architecture.
+- Never modify unrelated files.
+- Prefer composition over inheritance.
+- Prefer interfaces over concrete implementations.
+- Always reuse existing abstractions.
+- Keep functions under 50 lines.
+- Keep classes under 300 lines.
+- Always type hints.
+- Always write tests.
+- Never duplicate code.
+- Never implement multiple milestones.
+- Only modify files required for current task.
+- Never scan the repository unless requested.
+- Always use PROJECT.md as architectural reference.
+- Always update TODO.md after completing work.
+

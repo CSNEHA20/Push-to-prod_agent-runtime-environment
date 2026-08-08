@@ -98,8 +98,11 @@ The `arc-sdk` package exposes the following primary functions and models on the 
 | `arc.Session` | Model | Strongly typed Session data model (Pydantic). |
 | `arc.TraceStep` | Model | Strongly typed TraceStep data model (Pydantic). |
 | `arc.VerificationResult` | Model | Strongly typed Context Firewall verification result. |
+| `arc.FirewallRule` | Model | Strongly typed Context Firewall security rule model. |
+| `arc.RecoveryDiff` | Model | Strongly typed Recovery Engine state diff model. |
 | `arc.ReplayTimeline` | Model | Visual replay timeline data model. |
 | `arc.RecoveryPlan` | Model | Recovery Engine strategy data model. |
+
 
 ---
 

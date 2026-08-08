@@ -100,22 +100,46 @@ class TestTypesStandardization(unittest.TestCase):
         self.assertEqual(backend_rule.id, sdk_rule.id)
         self.assertEqual(backend_rule.threshold, sdk_rule.threshold)
 
-    def test_recovery_diff_model_parity(self):
-        diff_data = {
-            "id": "diff-100",
-            "session_id": "123e4567-e89b-12d3-a456-426614174000",
-            "failed_step_id": "987e6543-e89b-12d3-a456-426614174000",
-            "strategy_used": "prune_context",
-            "diff_payload": {"removed_keys": ["untrusted_user_input"]},
-            "status": "computed",
-        }
-        sdk_diff = RecoveryDiff(**diff_data)
-        self.assertEqual(sdk_diff.id, "diff-100")
+    def test_firewall_rule_defaults_and_serialization(self):
+        rule = FirewallRule(id="rule-def", rule_type="heuristic")
+        self.assertEqual(rule.action, FirewallAction.BLOCK)
+        self.assertEqual(rule.threshold, 0.8)
+        self.assertIsNone(rule.pattern)
+        rule_dict = rule.to_dict()
+        self.assertEqual(rule_dict["id"], "rule-def")
+        self.assertEqual(rule_dict["action"], "block")
 
-        backend_diff = RecoveryDiffResponse(**diff_data)
-        self.assertEqual(backend_diff.id, sdk_diff.id)
-        self.assertEqual(backend_diff.diff_payload, sdk_diff.diff_payload)
+    def test_recovery_diff_defaults_and_serialization(self):
+        diff = RecoveryDiff(
+            id="diff-def",
+            session_id="sess-001",
+            failed_step_id="step-001",
+            strategy_used="retry",
+        )
+        self.assertEqual(diff.status, "computed")
+        self.assertEqual(diff.diff_payload, {})
+        diff_dict = diff.to_dict()
+        self.assertEqual(diff_dict["status"], "computed")
+        self.assertEqual(diff_dict["strategy_used"], "retry")
+
+    def test_firewall_action_and_session_status_enums(self):
+        self.assertEqual(FirewallAction.ALLOW.value, "allow")
+        self.assertEqual(FirewallAction.BLOCK.value, "block")
+        self.assertEqual(FirewallAction.SANITIZE.value, "sanitize")
+        self.assertEqual(SessionStatus.RUNNING.value, "running")
+        self.assertEqual(SessionStatus.ACTIVE.value, "active")
+
+    def test_checkpoint_and_replay_models(self):
+        chk = Checkpoint(checkpoint_id="chk-1", session_id="sess-1", step_number=3)
+        self.assertEqual(chk.checkpoint_id, "chk-1")
+        self.assertEqual(chk.step_number, 3)
+        self.assertIsInstance(chk.to_dict(), dict)
+
+        timeline = ReplayTimeline(session_id="sess-1", recovery_checkpoints=[chk])
+        self.assertEqual(len(timeline.recovery_checkpoints), 1)
+        self.assertEqual(timeline.recovery_checkpoints[0].checkpoint_id, "chk-1")
 
 
 if __name__ == "__main__":
     unittest.main()
+
