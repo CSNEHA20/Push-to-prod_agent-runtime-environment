@@ -1,6 +1,8 @@
 # ARC Python SDK (`arc-sdk`)
 
-> **Agent Runtime Core (ARC)** — Clean Python SDK for Claude AI agents with Flight Recorder step tracing, Context Firewall filtering, and Recovery Engine auto-rollback.
+> **Agent Runtime Core (ARC)** - Production-grade Python SDK for Claude AI agents featuring Flight Recorder step tracing, Context Firewall filtering, and Recovery Engine auto-rollback.
+
+Built to Anthropic's enterprise SDK standards: fully typed (PEP 561), native sync & async HTTP clients (`ARC` & `AsyncARC`), exponential backoff retries, transparent Anthropic client middleware wrapping, context managers, and CLI tooling.
 
 ---
 
@@ -12,27 +14,128 @@
 pip install arc-sdk
 ```
 
-### 2. 5-Line Minimal Example
-
-```python
-import arc_sdk
-
-# 1. Initialize credentials
-arc_sdk.init(api_key="arc_dev_key", anthropic_api_key="sk-ant-...")
-
-# 2. Create ARC-protected agent session
-agent = arc_sdk.Agent(name="My Agent", task="Do something")
-
-# 3. Call Claude via ARC Runtime
-result = agent.call_claude([{"role": "user", "content": "Summarize key findings"}])
-
-# 4. View live execution dashboard URL
-print(agent.dashboard_url)
+Or install in editable mode from source:
+```bash
+git clone https://github.com/Vishallakshmikanthan/agent-runtime-core.git
+cd agent-runtime-core/sdk
+pip install -e .
 ```
 
 ---
 
-## 🛡️ Core Features
+## 🚀 Usage Examples
+
+### Synchronous Usage with Anthropic Client Wrapping
+
+```python
+import anthropic
+import arc
+
+# 1. Initialize global credentials
+arc.init(api_key="arc_dev_key", anthropic_api_key="sk-ant-...")
+
+# 2. Wrap existing Anthropic client in ARC protection middleware
+client = anthropic.Anthropic()
+protected_agent = arc.wrap(client, name="Market Analyst", task="Analyze Q3 trends")
+
+# 3. Call Claude under ARC protection
+response = protected_agent.call_claude([{"role": "user", "content": "Summarize key findings"}])
+print("Response:", response)
+
+# 4. View live dashboard link
+print("Dashboard URL:", protected_agent.dashboard_url)
+```
+
+### Asynchronous Native Usage (`AsyncARC` & `AsyncARCAgent`)
+
+```python
+import asyncio
+from arc import AsyncARC, AsyncARCAgent
+
+async def main():
+    async with AsyncARC(server_url="http://localhost:8000") as arc_client:
+        agent = AsyncARCAgent(name="Stream Processor", task="Process live data", arc_client=arc_client, mock_mode=True)
+        
+        # Protected step tracing context manager
+        async with agent.atrace_step("fetch_data", input_data={"stream_id": 42}):
+            # Perform processing step
+            await asyncio.sleep(0.1)
+
+        result = await agent.acomplete(output={"status": "success"})
+        print("Async Session Complete:", result)
+
+asyncio.run(main())
+```
+
+### Function Decorator Pattern (`@arc.protected`)
+
+```python
+import arc
+
+@arc.protected(name="Financial Engine", task="Calculate Risk Ratio")
+def compute_risk(portfolio_value: float, volatility: float) -> float:
+    return portfolio_value * volatility
+
+risk_score = compute_risk(100000.0, 0.15)
+print("Risk Score:", risk_score)
+```
+
+---
+
+## 📖 Public API Surface Reference
+
+The `arc-sdk` package exposes the following primary functions and models on the `arc` namespace:
+
+| Symbol | Type | Description |
+| :--- | :--- | :--- |
+| `arc.init(...)` | Function | Initialize global API keys, server URLs, and default client settings. |
+| `arc.wrap(client)` | Function | Wrap an Anthropic sync/async client in ARC protection middleware. |
+| `arc.protected(...)` | Decorator | Decorator for protecting functions with step tracing and recovery. |
+| `arc.ARC` | Class | Production-grade synchronous HTTP client built natively on `httpx.Client`. |
+| `arc.AsyncARC` | Class | Production-grade asynchronous HTTP client built natively on `httpx.AsyncClient`. |
+| `arc.ARCAgent` | Class | Synchronous agent protection wrapper. |
+| `arc.AsyncARCAgent` | Class | Asynchronous agent protection wrapper. |
+| `arc.Session` | Model | Strongly typed Session data model (Pydantic). |
+| `arc.TraceStep` | Model | Strongly typed TraceStep data model (Pydantic). |
+| `arc.VerificationResult` | Model | Strongly typed Context Firewall verification result. |
+| `arc.FirewallRule` | Model | Strongly typed Context Firewall security rule model. |
+| `arc.RecoveryDiff` | Model | Strongly typed Recovery Engine state diff model. |
+| `arc.ReplayTimeline` | Model | Visual replay timeline data model. |
+| `arc.RecoveryPlan` | Model | Recovery Engine strategy data model. |
+
+
+---
+
+## 🖥️ Command Line Interface (CLI)
+
+The `arc-sdk` package registers the `arc` terminal command.
+
+```bash
+# Print version
+arc --version
+
+# Initialize local config file (.arc.json)
+arc init --api-key "arc_key_123" --server-url "http://localhost:8000"
+
+# Inspect session details
+arc inspect <session_id>
+
+# Retrieve execution trace
+arc trace <session_id>
+
+# Retrieve visual replay timeline
+arc replay <session_id>
+
+# Inspect recovery checkpoints
+arc recover <session_id>
+
+# Verify Context Firewall trace compliance
+arc verify <session_id>
+```
+
+---
+
+## 🛡️ Core Reliability Engines
 
 - **Flight Recorder (Engine 1):** Step-by-step trace recording, token tracking, confidence heuristics, and timeline replay.
 - **Context Firewall (Engine 2):** Context filtering, factual/numerical conflict detection ($7.3B vs $8.1B funding), and provenance tagging.
@@ -40,54 +143,18 @@ print(agent.dashboard_url)
 
 ---
 
-## 📖 Core API Reference
+## 🧪 Testing & Verification
 
-### `ARCClient`
-```python
-from arc_sdk import ARCClient
+Run the test suite using `pytest`:
 
-client = ARCClient(server_url="http://localhost:8000")
-
-# List recent sessions
-sessions = client.get_sessions(limit=50)
-
-# Get specific session details
-session = client.get_session("<session-id>")
-
-# Get step trace
-trace = client.get_trace("<session-id>")
-
-# Get visual replay object
-replay = client.get_replay("<session-id>")
-```
-
-### `ARCAgent`
-```python
-import arc_sdk
-
-agent = arc_sdk.Agent(name="Research Agent", task="Analyze financial data")
-
-# Call Claude with Context Firewall conflict detection
-response = agent.call_claude(
-    messages=[{"role": "user", "content": "Write financial analysis"}],
-    context_sources=[
-        {"name": "report1.pdf", "content": "Q3 Revenue was $7.3B"},
-        {"name": "blog.html", "content": "Q3 Revenue was $8.1B"}
-    ]
-)
-
-# Run tool with Flight Recorder step tracing and state checkpointing
-tool_res = agent.run_tool("search_overview", {"query": "Anthropic"}, search_fn)
-
-# Mark session completed
-agent.complete(output=response)
-
-print("Dashboard URL:", agent.dashboard_url)
+```bash
+cd sdk
+pytest tests -v
 ```
 
 ---
 
 ## 🔗 Documentation & Links
-- **ARC GitHub Repository:** [Agent Runtime Core](https://github.com/Vishallakshmikanthan/agent-runtime-core)
+- **Technical Guide:** [docs/SDK_GUIDE.md](file:///c:/Users/Lenovo/Downloads/agent-runtime-core/docs/SDK_GUIDE.md)
 - **ARC Backend API:** `http://localhost:8000/docs`
 - **ARC Developer Dashboard:** `http://localhost:3000`

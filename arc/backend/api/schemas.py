@@ -142,6 +142,28 @@ class RecoveryStatusResponse(BaseModel):
     last_failure_step: Optional[int] = None
     overall_health: str
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class FirewallRuleResponse(BaseModel):
+    id: str
+    rule_type: str
+    action: str = "block"
+    threshold: float = 0.8
+    pattern: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class RecoveryDiffResponse(BaseModel):
+    id: str
+    session_id: str
+    failed_step_id: str
+    strategy_used: str
+    diff_payload: Dict[str, Any] = Field(default_factory=dict)
+    status: str = "computed"
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
 
 

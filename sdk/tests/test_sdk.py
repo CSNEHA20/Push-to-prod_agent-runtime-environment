@@ -7,11 +7,12 @@ sdk_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if sdk_path not in sys.path:
     sys.path.insert(0, sdk_path)
 
+import arc
 import arc_sdk
 from arc_sdk import ARCClient, ARCAgent
 
 
-class TestARCSDK(unittest.TestCase):
+class TestARCSDKLegacy(unittest.TestCase):
     def setUp(self):
         arc_sdk.init(
             api_key="test-api-key",
@@ -24,6 +25,7 @@ class TestARCSDK(unittest.TestCase):
         self.assertEqual(arc_sdk._global_config["api_key"], "test-api-key")
         self.assertEqual(arc_sdk.Agent, ARCAgent)
         self.assertEqual(arc_sdk.Client, ARCClient)
+        self.assertEqual(arc_sdk.__version__, arc.__version__)
 
     def test_agent_creation_and_properties(self):
         agent = arc_sdk.Agent(name="Test Agent", task="Run test suite")
