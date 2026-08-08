@@ -1,14 +1,15 @@
 """ARC Runtime — the interception orchestrator.
 
 Every intercepted provider call flows through :meth:`ARCRuntime.run_create`
-(or :meth:`ARCRuntime.open_stream`), which threads the request through the
-full pipeline before and after the real provider call::
+(sync) or :meth:`ARCRuntime.async_run_create` (async), which thread the
+request through the full pipeline before and after the real provider call::
 
     Middleware -> Context Firewall -> Event Bus -> Flight Recorder
       -> Verification -> Recovery -> [provider SDK] -> Replay Store -> Dashboard
 
 The provider's response object is returned to the caller **unchanged** — the
-runtime only observes it (text, token usage, tool/stop metadata) for recording.
+runtime only observes it (text, token usage, tool/stop/thinking metadata) for
+recording. Both sync and async Anthropic client shapes are supported.
 """
 
 from __future__ import annotations
@@ -47,50 +48,80 @@ _STRICT_MIN_CONFIDENCE = 0.7
 Invoke = Callable[[Dict[str, Any]], Any]
 
 
-def extract_response(raw: Any) -> Tuple[str, Dict[str, int], List[str], Optional[str]]:
-    """Observe a provider response: ``(text, token_usage, tool_names, stop_reason)``.
+def extract_response(
+    raw: Any,
+) -> Tuple[str, Dict[str, int], List[str], Optional[str], bool]:
+    """Observe a provider response without mutating it.
 
-    Handles the Anthropic ``Message`` shape (a list of typed content blocks),
-    plain dicts, and strings, without mutating ``raw``.
+    Returns ``(text, token_usage, tool_names, stop_reason, has_thinking)``.
+
+    Handles:
+    * Anthropic ``Message`` — typed content blocks (text, thinking, tool_use)
+    * Plain ``dict`` with a ``content`` key
+    * Bare ``str``
     """
     text_parts: List[str] = []
     tool_names: List[str] = []
+    has_thinking = False
+
     content = getattr(raw, "content", None)
     if content is None and isinstance(raw, dict):
         content = raw.get("content")
 
     if isinstance(content, list):
         for block in content:
-            btype = getattr(block, "type", None)
+            # Resolve block type from attribute or dict key
+            btype: Optional[str] = getattr(block, "type", None)
             if btype is None and isinstance(block, dict):
                 btype = block.get("type")
-            if btype == "text" or (btype is None and hasattr(block, "text")):
-                text_parts.append(getattr(block, "text", "") or "")
-            elif btype == "text" and isinstance(block, dict):
-                text_parts.append(block.get("text", ""))
+
+            if btype == "text":
+                txt = (
+                    block.get("text", "") if isinstance(block, dict)
+                    else getattr(block, "text", "") or ""
+                )
+                text_parts.append(txt)
+            elif btype == "thinking":
+                # Extended thinking block — record presence but not content
+                has_thinking = True
             elif btype == "tool_use":
-                tool_names.append(getattr(block, "name", None) or "tool")
+                name = (
+                    block.get("name") if isinstance(block, dict)
+                    else getattr(block, "name", None)
+                ) or "tool"
+                tool_names.append(name)
+            elif btype is None and hasattr(block, "text"):
+                # Fallback: un-typed block that carries .text
+                text_parts.append(getattr(block, "text", "") or "")
     elif isinstance(content, str):
         text_parts.append(content)
     elif isinstance(raw, str):
         text_parts.append(raw)
 
-    usage_obj = getattr(raw, "usage", None) or (raw.get("usage") if isinstance(raw, dict) else None)
+    usage_obj = (
+        getattr(raw, "usage", None)
+        or (raw.get("usage") if isinstance(raw, dict) else None)
+    )
     usage: Dict[str, int] = {}
     if usage_obj is not None:
         usage = {
-            "input_tokens": int(getattr(usage_obj, "input_tokens", 0)
-                                if not isinstance(usage_obj, dict)
-                                else usage_obj.get("input_tokens", 0) or 0),
-            "output_tokens": int(getattr(usage_obj, "output_tokens", 0)
-                                 if not isinstance(usage_obj, dict)
-                                 else usage_obj.get("output_tokens", 0) or 0),
+            "input_tokens": int(
+                usage_obj.get("input_tokens", 0)
+                if isinstance(usage_obj, dict)
+                else getattr(usage_obj, "input_tokens", 0) or 0
+            ),
+            "output_tokens": int(
+                usage_obj.get("output_tokens", 0)
+                if isinstance(usage_obj, dict)
+                else getattr(usage_obj, "output_tokens", 0) or 0
+            ),
         }
 
-    stop_reason = getattr(raw, "stop_reason", None)
+    stop_reason: Optional[str] = getattr(raw, "stop_reason", None)
     if stop_reason is None and isinstance(raw, dict):
         stop_reason = raw.get("stop_reason")
-    return "".join(text_parts).strip(), usage, tool_names, stop_reason
+
+    return "".join(text_parts).strip(), usage, tool_names, stop_reason, has_thinking
 
 
 class ARCRuntime:
@@ -168,8 +199,12 @@ class ARCRuntime:
 
         latency = (time.perf_counter() - start) * 1000.0
         if streaming:
-            return self._record_streamed_iterator(req, step_number, input_summary, latency, raw)
-        return self._record_message(req, step_number, input_summary, latency, raw, invoke)
+            return self._record_streamed_iterator(
+                req, step_number, input_summary, latency, raw
+            )
+        return self._record_message(
+            req, step_number, input_summary, latency, raw, invoke
+        )
 
     def _record_message(
         self,
@@ -180,7 +215,7 @@ class ARCRuntime:
         raw: Any,
         invoke: Invoke,
     ) -> ResponseContext:
-        text, usage, tools, stop_reason = extract_response(raw)
+        text, usage, tools, stop_reason, has_thinking = extract_response(raw)
         plan: Optional[ExecutionPlan] = req.metadata.get("execution_plan")
         step = self.recorder.record(
             self.recorder.build_step(
@@ -189,7 +224,11 @@ class ARCRuntime:
                 name=f"messages.create ({req.payload.get('model', '?')})",
                 input_data={**input_summary, "plan": plan.to_dict() if plan else None},
                 output_text=text,
-                output_data={"tools": tools, "stop_reason": stop_reason},
+                output_data={
+                    "tools": tools,
+                    "stop_reason": stop_reason,
+                    "has_thinking": has_thinking,
+                },
                 token_usage=usage,
                 latency_ms=latency,
             )
@@ -205,7 +244,9 @@ class ARCRuntime:
             )
             if self._retry_allowed(plan, req):
                 self._emit_recovery(req.session_id, step_number)
-                retry = req.model_copy(update={"metadata": {**req.metadata, "_arc_retry": True}})
+                retry = req.model_copy(
+                    update={"metadata": {**req.metadata, "_arc_retry": True}}
+                )
                 return self._core(retry, invoke, streaming=False)
             if self._checkpoint_recovery(plan):
                 self._emit_recovery(req.session_id, step_number)
@@ -292,12 +333,15 @@ class ARCRuntime:
     ) -> TraceStep:
         """Run the post-dispatch stages for a stream once it has completed."""
         plan = self._stream_plans.pop(step_number, None)
-        input_summary = {**self._input_summary(payload), "plan": plan.to_dict() if plan else None}
+        input_summary = {
+            **self._input_summary(payload),
+            "plan": plan.to_dict() if plan else None,
+        }
         if error is not None:
             return self._record_failure(
                 self.session_id, step_number, input_summary, error, latency_ms
             )
-        text, usage, tools, stop_reason = extract_response(final_message)
+        text, usage, tools, stop_reason, has_thinking = extract_response(final_message)
         step = self.recorder.record(
             self.recorder.build_step(
                 self.session_id,
@@ -305,7 +349,11 @@ class ARCRuntime:
                 name=f"messages.stream ({payload.get('model', '?')})",
                 input_data=input_summary,
                 output_text=text,
-                output_data={"tools": tools, "stop_reason": stop_reason},
+                output_data={
+                    "tools": tools,
+                    "stop_reason": stop_reason,
+                    "has_thinking": has_thinking,
+                },
                 token_usage=usage,
                 latency_ms=latency_ms,
             )
@@ -409,14 +457,20 @@ class ARCRuntime:
     @staticmethod
     def _input_summary(payload: Dict[str, Any]) -> Dict[str, Any]:
         # Capture request metadata without copying large/opaque message content.
+        thinking_val = payload.get("thinking")
+        has_thinking = bool(thinking_val) and (
+            (isinstance(thinking_val, dict) and thinking_val.get("type") == "enabled")
+            or not isinstance(thinking_val, dict)
+        )
         return {
             "model": payload.get("model"),
             "message_count": len(payload.get("messages") or []),
             "max_tokens": payload.get("max_tokens"),
             "streaming": bool(payload.get("stream")),
             "has_tools": bool(payload.get("tools")),
-            "has_thinking": bool(payload.get("thinking")),
+            "has_thinking": has_thinking,
             "has_mcp": bool(payload.get("mcp_servers")),
+            "betas": list(payload.get("betas") or []),
             "request_metadata": payload.get("metadata") or {},
         }
 
@@ -489,6 +543,103 @@ class ARCRuntime:
         self._emit_recorded(sid, step)
         return raw
 
+    # -- async pipeline ------------------------------------------------------
+
+    async def async_run_create(
+        self,
+        payload: Dict[str, Any],
+        invoke: "AsyncInvoke",
+        context_sources: Optional[List[Dict[str, Any]]] = None,
+    ) -> Any:
+        """Async equivalent of :meth:`run_create` for ``AsyncAnthropic`` clients."""
+        request = RequestContext(
+            session_id=self.session_id,
+            provider=self.config.provider,
+            payload=payload,
+            context_sources=list(context_sources or []),
+        )
+        # Run the sync middleware pipeline in a thread-safe way, then await core.
+        response_ctx = await self._async_core(request, invoke)
+        return response_ctx.metadata["raw_response"]
+
+    async def _async_core(
+        self, req: RequestContext, invoke: "AsyncInvoke"
+    ) -> "ResponseContext":
+        step_number = self.recorder.next_step_number(req.session_id)
+        _, conflicts = self.firewall.filter(req.context_sources)
+        self.events.emit(
+            Event(
+                type="request_started",
+                session_id=req.session_id,
+                payload={"step_number": step_number, "conflicts": len(conflicts), "async": True},
+            )
+        )
+        self.recovery.checkpoint(req.session_id, step_number, {"step": step_number})
+        input_summary = self._input_summary(req.payload)
+
+        start = time.perf_counter()
+        try:
+            raw = await invoke(req.payload)
+        except Exception as exc:  # noqa: BLE001 - record then re-raise unchanged
+            latency = (time.perf_counter() - start) * 1000.0
+            self._record_failure(req.session_id, step_number, input_summary, str(exc), latency)
+            raise
+
+        latency = (time.perf_counter() - start) * 1000.0
+        return self._record_message(req, step_number, input_summary, latency, raw, None)  # type: ignore[arg-type]
+
+    async def async_begin_stream(
+        self,
+        payload: Dict[str, Any],
+        context_sources: Optional[List[Dict[str, Any]]],
+    ) -> int:
+        """Async equivalent of :meth:`begin_stream`."""
+        step_number = self.recorder.next_step_number(self.session_id)
+        request = RequestContext(
+            session_id=self.session_id,
+            provider=self.config.provider,
+            payload=payload,
+            context_sources=list(context_sources or []),
+        )
+        plan = self.planner.plan(request)
+        self._stream_plans[step_number] = plan
+        self.events.emit(
+            Event(
+                type=EventType.PLAN_CREATED.value,
+                session_id=self.session_id,
+                payload=plan.to_dict(),
+            )
+        )
+        _, conflicts = self.firewall.filter(request.context_sources)
+        self.events.emit(
+            Event(
+                type="request_started",
+                session_id=self.session_id,
+                payload={
+                    "step_number": step_number,
+                    "streaming": True,
+                    "async": True,
+                    "conflicts": len(conflicts),
+                },
+            )
+        )
+        self.recovery.checkpoint(self.session_id, step_number, {"step": step_number})
+        return step_number
+
+    async def async_finish_stream(
+        self,
+        step_number: int,
+        payload: Dict[str, Any],
+        latency_ms: float,
+        final_message: Any,
+        error: Optional[str],
+    ) -> TraceStep:
+        """Async equivalent of :meth:`finish_stream`."""
+        return self.finish_stream(step_number, payload, latency_ms, final_message, error)
+
+
+AsyncInvoke = Callable[[Dict[str, Any]], Any]  # returns a coroutine at call-time
+
 
 def _run_maybe_coroutine(value: Any) -> Any:
     """If *value* is a coroutine or awaitable, drive it to completion synchronously."""
@@ -510,4 +661,9 @@ def _run_maybe_coroutine(value: Any) -> Any:
     return asyncio.run(value)
 
 
-__all__ = ["ARCRuntime", "extract_response", "_run_maybe_coroutine"]
+__all__ = [
+    "ARCRuntime",
+    "AsyncInvoke",
+    "extract_response",
+    "_run_maybe_coroutine",
+]

@@ -19,10 +19,18 @@ from typing import Any, Dict, List, Optional, Type, Union
 
 from ._agent import WrappedAgent, _detect_framework
 from ._runtime import ARCRuntime
-from ._transport import _MessagesProxy, _NamespaceProxy
+from ._transport import (
+    AsyncMessagesProxy,
+    AsyncNamespaceProxy,
+    _MessagesProxy,
+    _NamespaceProxy,
+)
 from .config import ARCConfig
 from .exceptions import ConfigurationError
-from .integrations.anthropic.wrapper import AnthropicClientWrapper
+from .integrations.anthropic.wrapper import (
+    AnthropicClientWrapper,
+    AsyncAnthropicClientWrapper,
+)
 from .runtime.planner import Planner
 from .types import (
     EventHandler,
@@ -95,13 +103,27 @@ class ARC:
 
     @property
     def messages(self) -> _MessagesProxy:
-        """Intercepting proxy over ``client.messages`` (``create`` / ``stream``)."""
+        """Intercepting proxy over ``client.messages`` (``create`` / ``stream``).
+
+        For async clients use :attr:`async_messages` or wrap the client with
+        :meth:`wrap` which returns an :class:`~arc.integrations.anthropic.wrapper.AsyncAnthropicClientWrapper`.
+        """
         return _MessagesProxy(self._require_client().messages, self._runtime)
+
+    @property
+    def async_messages(self) -> AsyncMessagesProxy:
+        """Async intercepting proxy for ``AsyncAnthropic`` clients."""
+        return AsyncMessagesProxy(self._require_client().messages, self._runtime)
 
     @property
     def beta(self) -> _NamespaceProxy:
         """Intercepting proxy over ``client.beta`` (e.g. MCP via ``beta.messages``)."""
         return _NamespaceProxy(self._require_client().beta, self._runtime)
+
+    @property
+    def async_beta(self) -> AsyncNamespaceProxy:
+        """Async intercepting proxy over ``client.beta`` for ``AsyncAnthropic`` clients."""
+        return AsyncNamespaceProxy(self._require_client().beta, self._runtime)
 
     @property
     def session_id(self) -> str:
@@ -211,7 +233,11 @@ class ARC:
         """
         framework = _detect_framework(client)
 
-        # Anthropic SDK gets the full transport proxy (richer than WrappedAgent).
+        # Async Anthropic client — full async transport proxy.
+        if framework == "async_anthropic":
+            return AsyncAnthropicClientWrapper(client, self._runtime)
+
+        # Sync Anthropic SDK gets the full sync transport proxy.
         if framework == "anthropic":
             return AnthropicClientWrapper(client, self._runtime)
 

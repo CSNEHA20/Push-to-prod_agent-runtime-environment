@@ -31,7 +31,10 @@ T = TypeVar("T")
 
 _FRAMEWORK_CHECKS: list[tuple[str, list[str]]] = [
     # Order matters — more specific checks come first.
-    ("anthropic", ["messages", "beta"]),           # Anthropic SDK client
+    # AsyncAnthropic must come before Anthropic because both share messages+beta.
+    # AsyncAnthropic clients expose __aenter__ / __aexit__ as async context managers.
+    ("async_anthropic", ["messages", "beta", "__aenter__", "__aexit__"]),
+    ("anthropic", ["messages", "beta"]),           # Anthropic SDK sync client
     ("openai_agents", ["run", "tools", "model"]),  # OpenAI Agents SDK Runner/Agent
     ("langgraph", ["invoke", "stream", "get_graph"]),  # LangGraph CompiledGraph
     ("crewai", ["kickoff", "agents", "tasks"]),    # CrewAI Crew
@@ -175,7 +178,7 @@ class WrappedAgent(Generic[T]):
             for m in ("run_task", "run"):
                 if hasattr(agent, m):
                     _methods.append((m, f"{_step}.{m}"))
-        elif framework in ("anthropic", "openai_client", "openai_agents"):
+        elif framework in ("anthropic", "async_anthropic", "openai_client", "openai_agents"):
             # Provider-level interception — wrap the callable entry points
             for m in ("run", "invoke", "complete", "generate"):
                 if hasattr(agent, m) and callable(getattr(agent, m)):
