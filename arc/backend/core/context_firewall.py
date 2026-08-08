@@ -265,3 +265,20 @@ class ContextFirewall:
                 pass
 
         return result
+
+    def inspect_prompt(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Inspects and sanitizes system prompts, messages, tool outputs, retrieved documents,
+        memory, and attachments in payload before sending to model provider.
+        """
+        try:
+            from arc.runtime.firewall import PromptFirewall
+            from arc.types import RequestContext
+            pf = PromptFirewall()
+            req = RequestContext(payload=payload, context_sources=payload.get("context_sources", []))
+            res = pf.inspect_and_sanitize(req)
+            return res.sanitized_payload
+        except Exception as e:
+            logger.warning(f"Fallback during inspect_prompt: {e}")
+            return payload
+

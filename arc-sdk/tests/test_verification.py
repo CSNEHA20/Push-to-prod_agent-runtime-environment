@@ -219,7 +219,7 @@ def test_registered_verifier_shapes_step_confidence_and_evidence() -> None:
     verification = step.output_data["verification"]
     assert verification["verified"] is True
     names = {c["name"] for c in verification["checks"]}
-    assert {"response_integrity", "mentions_spaceship"} <= names
+    assert {"response_integrity", "assertion"} <= names
     for check in verification["checks"]:
         assert "evidence" in check and "explanation" in check
 

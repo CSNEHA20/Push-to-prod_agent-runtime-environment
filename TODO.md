@@ -189,3 +189,10 @@ This document details the granular, ordered development milestones for convertin
 - **Public API unchanged**: `from arc import ARC; client = ARC(Anthropic()); client.messages.create(...)` — everything else automatic.
 - **Test**: `cd arc-sdk && pytest` (13 new pipeline tests; **148 total passing**, all prior behaviour preserved) — graph derived from plan (skip/verify/recover node presence), streaming graph omits recover, provider-independent graph, ordered executor events, services-subscribe-not-call (verifier untouched when no verify node), `graph_built` event, graph shape recorded on the step, end-to-end sync/async/stream/retry/failure through the graph.
 - **Success Criteria**: the execution graph governs runtime behaviour for every model request; services react to graph events rather than direct calls; public API and all existing tests remain green.
+
+### M0.9: Enterprise Prompt Firewall Upgrade [COMPLETED]
+- **Files**: `arc-sdk/arc/runtime/firewall/prompt_firewall.py` (new), `arc-sdk/arc/runtime/firewall/detector.py` (new), `arc-sdk/arc/runtime/firewall/detectors/*.py` (new), `arc-sdk/arc/runtime/firewall/default.py`, `arc-sdk/arc/runtime/firewall/__init__.py`, `arc-sdk/arc/types.py`, `arc-sdk/arc/runtime/graph/services.py`, `arc/backend/core/context_firewall.py`, `arc-sdk/tests/test_prompt_firewall.py`.
+- **Goal**: Upgraded Context Firewall into a pluggable **Prompt Firewall**. Inspects all 6 input targets (System prompts, Messages, Tool outputs, Retrieved documents, Memory, Attachments) across 8 pluggable detectors (Prompt Injection, Jailbreak, PII, Secrets, Recursive Prompting, Prompt Leakage, Context Explosion, Duplicate Context). Sanitizes request payload before dispatching to the provider adapter. Maintains 100% backward compatibility for `ContextFirewall`.
+- **Test**: `cd arc-sdk && python -m pytest` (**202 total passing**).
+- **Success Criteria**: Sanitized payload reaches provider dispatch; PII & Secrets redacted; prompt injection/jailbreak/leakage neutralized; duplicate context deduplicated; 202 tests green.
+

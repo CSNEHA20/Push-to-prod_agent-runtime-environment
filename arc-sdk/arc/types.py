@@ -180,6 +180,40 @@ class VerificationResult(_Model):
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Verification metadata")
 
 
+class SanitizationAction(str, Enum):
+    """Action taken by a Prompt Firewall detector."""
+
+    NONE = "none"
+    REDACT = "redact"
+    DROP = "drop"
+    BLOCK = "block"
+    TRUNCATE = "truncate"
+    DEDUPLICATE = "deduplicate"
+
+
+class FirewallFinding(_Model):
+    """A threat, violation, or sanitization event detected by a firewall detector."""
+
+    detector_name: str = Field(..., description="Name of the detector")
+    category: str = Field(..., description="Detector category (e.g. prompt_injection, pii, secrets)")
+    severity: str = Field(default="medium", description="'low', 'medium', 'high', or 'critical'")
+    message: str = Field(..., description="Human-readable finding description")
+    location: str = Field(default="content", description="Input location (e.g. system, messages[0], tool_output)")
+    action_taken: SanitizationAction = Field(default=SanitizationAction.NONE, description="Action applied")
+    matched_text: Optional[str] = Field(default=None, description="Text segment that triggered the detector")
+
+
+class PromptFirewallResult(_Model):
+    """Complete result of inspecting and sanitizing prompt inputs before model dispatch."""
+
+    is_safe: bool = Field(..., description="True if no blocking threats were detected")
+    sanitized_payload: Dict[str, Any] = Field(default_factory=dict, description="Sanitized request payload")
+    sanitized_sources: List[Dict[str, Any]] = Field(default_factory=list, description="Sanitized context sources")
+    findings: List[FirewallFinding] = Field(default_factory=list, description="All detector findings")
+    conflicts: List[ConflictItem] = Field(default_factory=list, description="Detected context conflicts")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Execution metadata")
+
+
 class ReplayTimeline(_Model):
     """Ordered, replayable view of a recorded session."""
 
@@ -336,6 +370,9 @@ __all__ = [
     "Session",
     "ConflictItem",
     "VerificationResult",
+    "SanitizationAction",
+    "FirewallFinding",
+    "PromptFirewallResult",
     "ReplayTimeline",
     "RecoveryPlan",
     "ExecutionPlan",

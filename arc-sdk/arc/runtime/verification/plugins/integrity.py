@@ -38,17 +38,17 @@ class ResponseIntegrityVerifier:
             "stop_reason": stop,
         }
 
-        if not has_text and not has_tools:
-            return VerificationCheck(
-                name=self.name, verifier=self.verifier_type,
-                passed=False, score=0.0, evidence=evidence,
-                explanation="Response is empty (no text and no tool calls).",
-            )
         if stop == _REFUSAL:
             return VerificationCheck(
                 name=self.name, verifier=self.verifier_type,
                 passed=False, score=0.0, evidence=evidence,
                 explanation="Model refused the request (stop_reason=refusal).",
+            )
+        if not has_text and not has_tools:
+            return VerificationCheck(
+                name=self.name, verifier=self.verifier_type,
+                passed=False, score=0.0, evidence=evidence,
+                explanation="Response is empty (no text and no tool calls).",
             )
         if stop in _TRUNCATED:
             return VerificationCheck(

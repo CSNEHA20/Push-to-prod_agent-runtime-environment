@@ -87,9 +87,22 @@ class RuntimeServices:
 
     def _on_firewall(self, event: GraphEvent) -> None:
         ctx = event.context
-        _, conflicts = self._firewall.filter(ctx.request.context_sources)
+        if hasattr(self._firewall, "inspect_and_sanitize"):
+            result = self._firewall.inspect_and_sanitize(ctx.request)
+            ctx.request.payload = result.sanitized_payload
+            ctx.request.context_sources = result.sanitized_sources
+            conflicts = result.conflicts
+            findings = [f.to_dict() for f in result.findings]
+        else:
+            _, conflicts = self._firewall.filter(ctx.request.context_sources)
+            findings = []
+
         ctx.conflicts = conflicts
-        payload = {"step_number": ctx.step_number, "conflicts": len(conflicts)}
+        payload = {
+            "step_number": ctx.step_number,
+            "conflicts": len(conflicts),
+            "findings_count": len(findings),
+        }
         if ctx.streaming:
             payload["streaming"] = True
         if ctx.is_async:
