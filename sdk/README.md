@@ -1,6 +1,8 @@
 # ARC Python SDK (`arc-sdk`)
 
-> **Agent Runtime Core (ARC)** — Production-grade Python SDK for Claude AI agents featuring Flight Recorder step tracing, Context Firewall filtering, and Recovery Engine auto-rollback.
+> **Agent Runtime Core (ARC)** - Production-grade Python SDK for Claude AI agents featuring Flight Recorder step tracing, Context Firewall filtering, and Recovery Engine auto-rollback.
+
+Built to Anthropic's enterprise SDK standards: fully typed (PEP 561), native sync & async HTTP clients (`ARC` & `AsyncARC`), exponential backoff retries, transparent Anthropic client middleware wrapping, context managers, and CLI tooling.
 
 ---
 
@@ -21,43 +23,83 @@ pip install -e .
 
 ---
 
-## 🚀 5-Line Minimal Example
+## 🚀 Usage Examples
+
+### Synchronous Usage with Anthropic Client Wrapping
+
+```python
+import anthropic
+import arc
+
+# 1. Initialize global credentials
+arc.init(api_key="arc_dev_key", anthropic_api_key="sk-ant-...")
+
+# 2. Wrap existing Anthropic client in ARC protection middleware
+client = anthropic.Anthropic()
+protected_agent = arc.wrap(client, name="Market Analyst", task="Analyze Q3 trends")
+
+# 3. Call Claude under ARC protection
+response = protected_agent.call_claude([{"role": "user", "content": "Summarize key findings"}])
+print("Response:", response)
+
+# 4. View live dashboard link
+print("Dashboard URL:", protected_agent.dashboard_url)
+```
+
+### Asynchronous Native Usage (`AsyncARC` & `AsyncARCAgent`)
+
+```python
+import asyncio
+from arc import AsyncARC, AsyncARCAgent
+
+async def main():
+    async with AsyncARC(server_url="http://localhost:8000") as arc_client:
+        agent = AsyncARCAgent(name="Stream Processor", task="Process live data", arc_client=arc_client, mock_mode=True)
+        
+        # Protected step tracing context manager
+        async with agent.atrace_step("fetch_data", input_data={"stream_id": 42}):
+            # Perform processing step
+            await asyncio.sleep(0.1)
+
+        result = await agent.acomplete(output={"status": "success"})
+        print("Async Session Complete:", result)
+
+asyncio.run(main())
+```
+
+### Function Decorator Pattern (`@arc.protected`)
 
 ```python
 import arc
 
-# 1. Initialize credentials & endpoints
-arc.init(api_key="arc_dev_key", anthropic_api_key="sk-ant-...")
+@arc.protected(name="Financial Engine", task="Calculate Risk Ratio")
+def compute_risk(portfolio_value: float, volatility: float) -> float:
+    return portfolio_value * volatility
 
-# 2. Instantiate ARC-protected Agent
-agent = arc.Agent(name="Market Analyst", task="Analyze Q3 trends")
-
-# 3. Call Claude via ARC Runtime
-response = agent.call_claude([{"role": "user", "content": "Summarize key findings"}])
-
-# 4. View live dashboard monitoring link
-print("Dashboard URL:", agent.dashboard_url)
-
-# 5. Mark session complete
-arc.run(agent)
+risk_score = compute_risk(100000.0, 0.15)
+print("Risk Score:", risk_score)
 ```
 
 ---
 
 ## 📖 Public API Surface Reference
 
-The `arc-sdk` package exposes the following primary functions on the `arc` top-level namespace:
+The `arc-sdk` package exposes the following primary functions and models on the `arc` namespace:
 
-| Function / Symbol | Description |
-| :--- | :--- |
-| `arc.init(...)` | Initialize global API keys, server URLs, and default client settings. |
-| `arc.Agent(...)` | Instantiate a new `ARCAgent` session wrapper. |
-| `arc.run(target, ...)` | Execute an `ARCAgent` or wrapped function under ARC protection. |
-| `arc.trace(session_id)` | Retrieve step-by-step execution trace log for a session. |
-| `arc.replay(session_id)` | Retrieve visual timeline replay structure for a session. |
-| `arc.inspect(session_id)` | Retrieve detailed session metadata and status. |
-| `arc.recover(session_id)` | Inspect recovery status, rollback checkpoints, or plan. |
-| `arc.verify(session_id_or_trace)` | Run Context Firewall compliance checks on a session or trace. |
+| Symbol | Type | Description |
+| :--- | :--- | :--- |
+| `arc.init(...)` | Function | Initialize global API keys, server URLs, and default client settings. |
+| `arc.wrap(client)` | Function | Wrap an Anthropic sync/async client in ARC protection middleware. |
+| `arc.protected(...)` | Decorator | Decorator for protecting functions with step tracing and recovery. |
+| `arc.ARC` | Class | Production-grade synchronous HTTP client built natively on `httpx.Client`. |
+| `arc.AsyncARC` | Class | Production-grade asynchronous HTTP client built natively on `httpx.AsyncClient`. |
+| `arc.ARCAgent` | Class | Synchronous agent protection wrapper. |
+| `arc.AsyncARCAgent` | Class | Asynchronous agent protection wrapper. |
+| `arc.Session` | Model | Strongly typed Session data model (Pydantic). |
+| `arc.TraceStep` | Model | Strongly typed TraceStep data model (Pydantic). |
+| `arc.VerificationResult` | Model | Strongly typed Context Firewall verification result. |
+| `arc.ReplayTimeline` | Model | Visual replay timeline data model. |
+| `arc.RecoveryPlan` | Model | Recovery Engine strategy data model. |
 
 ---
 
@@ -103,7 +145,8 @@ arc verify <session_id>
 Run the test suite using `pytest`:
 
 ```bash
-pytest sdk/tests
+cd sdk
+pytest tests -v
 ```
 
 ---

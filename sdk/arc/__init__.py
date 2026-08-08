@@ -1,23 +1,40 @@
 """
-ARC SDK — Agent Runtime Core Python SDK
+ARC SDK - Agent Runtime Core Python SDK
 Reliability layer for Claude AI agents: Flight Recorder, Context Firewall, Recovery Engine.
 """
 
 import os
-from typing import Optional, List, Dict, Any, Union, Callable
+from typing import Optional, List, Dict, Any, Union
 
 from .version import __version__
 from .exceptions import (
     ARCError,
+    APIError,
+    APIConnectionError,
+    AuthenticationError,
+    NotFoundError,
+    ServerError,
     ARCClientError,
     ARCServerError,
     ARCVerificationError,
     ARCRecoveryError,
 )
-from .client import ARCClient
-from .agent import ARCAgent
+from .types import (
+    Session,
+    SessionList,
+    TraceStep,
+    ReplayTimeline,
+    VerificationResult,
+    ConflictItem,
+    RecoveryPlan,
+    Checkpoint,
+    SessionStatus,
+    StepType,
+)
+from .client import ARC, AsyncARC, ARCClient, AsyncARCClient
+from .agent import ARCAgent, AsyncARCAgent, wrap, protected
 
-_default_client: Optional[ARCClient] = None
+_default_client: Optional[ARC] = None
 _global_config = {
     "api_key": None,
     "anthropic_api_key": None,
@@ -51,21 +68,21 @@ def init(
     if anthropic_api_key:
         os.environ["ANTHROPIC_API_KEY"] = anthropic_api_key
 
-    _default_client = ARCClient(api_key=api_key, server_url=server_url)
+    _default_client = ARC(api_key=api_key, server_url=server_url)
 
 
-def get_default_client() -> ARCClient:
-    """Get or instantiate default ARCClient using global configuration."""
+def get_default_client() -> ARC:
+    """Get or instantiate default ARC client using global configuration."""
     global _default_client
     if _default_client is None:
-        _default_client = ARCClient(
+        _default_client = ARC(
             api_key=_global_config.get("api_key"),
             server_url=_global_config.get("server_url", "http://localhost:8000"),
         )
     return _default_client
 
 
-# Clean API exports & Aliases
+# Clean API Aliases
 Agent = ARCAgent
 Client = ARCClient
 
@@ -83,7 +100,7 @@ def run(
     :param target: ARCAgent instance or function callable.
     :return: Execution output result.
     """
-    if isinstance(target, ARCAgent):
+    if isinstance(target, (ARCAgent, AsyncARCAgent)):
         if args and callable(args[0]):
             fn = args[0]
             return target.run_tool(getattr(fn, "__name__", "fn"), kwargs, fn)
@@ -97,77 +114,68 @@ def run(
         raise ValueError(f"Cannot run object of type {type(target)}. Expected ARCAgent or Callable.")
 
 
-def trace(session_id: str) -> List[Dict[str, Any]]:
-    """
-    Retrieve execution step trace for a session ID.
-
-    :param session_id: Session UUID string.
-    :return: List of step trace dictionaries.
-    """
+def trace(session_id: str) -> List[TraceStep]:
+    """Retrieve execution step trace for a session ID."""
     return get_default_client().get_trace(session_id)
 
 
-def replay(session_id: str) -> Dict[str, Any]:
-    """
-    Retrieve visual replay timeline data for a session ID.
-
-    :param session_id: Session UUID string.
-    :return: Replay timeline structure dict.
-    """
+def replay(session_id: str) -> ReplayTimeline:
+    """Retrieve visual replay timeline data for a session ID."""
     return get_default_client().get_replay(session_id)
 
 
-def inspect(session_id: str) -> Dict[str, Any]:
-    """
-    Inspect detailed session information and metadata for a session ID.
-
-    :param session_id: Session UUID string.
-    :return: Session details dict.
-    """
+def inspect(session_id: str) -> Session:
+    """Inspect detailed session information and metadata for a session ID."""
     return get_default_client().get_session(session_id)
 
 
-def recover(session_id: str, checkpoint_id: Optional[str] = None) -> Dict[str, Any]:
-    """
-    Retrieve recovery status, rollback checkpoints, or plan for a session ID.
-
-    :param session_id: Session UUID string.
-    :param checkpoint_id: Optional specific checkpoint step ID.
-    :return: Recovery info dictionary.
-    """
+def recover(session_id: str) -> RecoveryPlan:
+    """Retrieve recovery status, rollback checkpoints, or plan for a session ID."""
     return get_default_client().get_recovery(session_id)
 
 
 def verify(
-    session_id_or_trace: Union[str, List[Dict[str, Any]]],
+    session_id_or_trace: Union[str, List[Dict[str, Any]], List[TraceStep]],
     rules: Optional[List[Dict[str, Any]]] = None,
-) -> Dict[str, Any]:
-    """
-    Verify session trace compliance using Context Firewall rules.
-
-    :param session_id_or_trace: Session UUID string or trace log list.
-    :param rules: Optional validation rules list.
-    :return: Verification outcome dict.
-    """
+) -> VerificationResult:
+    """Verify session trace compliance using Context Firewall rules."""
     return get_default_client().verify_session(session_id_or_trace, rules=rules)
 
 
-# Clean API exports
-Client = ARCClient
-
 __all__ = [
     "init",
-    "Agent",
-    "ARCAgent",
+    "wrap",
+    "protected",
     "run",
     "trace",
     "replay",
     "inspect",
     "recover",
     "verify",
+    "Agent",
     "Client",
+    "ARC",
+    "AsyncARC",
     "ARCClient",
+    "AsyncARCClient",
+    "ARCAgent",
+    "AsyncARCAgent",
+    "Session",
+    "SessionList",
+    "TraceStep",
+    "ReplayTimeline",
+    "VerificationResult",
+    "ConflictItem",
+    "RecoveryPlan",
+    "Checkpoint",
+    "SessionStatus",
+    "StepType",
     "ARCError",
+    "APIError",
+    "APIConnectionError",
+    "AuthenticationError",
+    "NotFoundError",
+    "ServerError",
     "ARCClientError",
     "ARCServerError",
     "ARCVerificationError",

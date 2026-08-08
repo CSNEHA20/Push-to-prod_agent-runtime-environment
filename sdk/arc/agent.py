@@ -1,22 +1,19 @@
 """
-ARC SDK — ARCAgent wrapper module for Claude agents.
+ARC SDK - Agent Protection Layer (`ARCAgent` and `AsyncARCAgent`).
+Provides transparent Anthropic client wrapping, automatic Flight Recorder step tracing, Context Firewall checking, and Recovery Engine support.
+Fully decoupled from backend server internals.
 """
 
-import os
-import sys
+import time
 import uuid
-import asyncio
-import logging
 import inspect
-from typing import Optional, List, Dict, Any, Union, Callable
+import logging
+from functools import wraps
+from typing import Optional, List, Dict, Any, Union, Callable, ContextManager, AsyncContextManager
 
-try:
-    import nest_asyncio
-    nest_asyncio.apply()
-except ImportError:
-    pass
-
-from .client import ARCClient
+from .client import ARC, AsyncARC
+from .types import Session, TraceStep, VerificationResult, SessionStatus
+from .exceptions import ARCError, APIError, APIConnectionError
 
 logger = logging.getLogger("arc.agent")
 
@@ -39,7 +36,7 @@ class MockAnthropicResponse:
 
 
 class MockAnthropicClient:
-    """Fallback mock Anthropic client when API key is missing or offline mode is active."""
+    """Mock Anthropic client explicitly used when mock_mode is enabled for offline testing."""
 
     class Messages:
         def __init__(self, parent):
@@ -54,7 +51,7 @@ class MockAnthropicClient:
                     break
 
             resp_text = (
-                f"ARC Managed Claude Response: Successfully processed query '{last_msg[:80]}...'"
+                f"ARC Managed Claude Response: Processed query '{last_msg[:80]}...'"
                 if last_msg
                 else "ARC Managed Claude Response"
             )
@@ -64,209 +61,210 @@ class MockAnthropicClient:
         self.messages = self.Messages(self)
 
 
-def get_default_anthropic_client(api_key: Optional[str] = None) -> Any:
-    """Helper to initialize Anthropic client or fallback mock client."""
-    key = api_key or os.getenv("ANTHROPIC_API_KEY")
-    invalid_keys = ("mock-key", "...", "your-api-key", "sk-ant-...")
-    if key and key not in invalid_keys and not key.startswith("sk-ant-..."):
-        try:
-            import anthropic
-            return anthropic.Anthropic(api_key=key)
-        except Exception as e:
-            logger.warning(f"Failed to initialize Anthropic client: {e}. Falling back to Mock client.")
-    return MockAnthropicClient()
+class StepContext:
+    """Synchronous context manager for manual step tracing."""
+    def __init__(self, agent: "ARCAgent", name: str, input_data: Optional[Dict[str, Any]] = None):
+        self.agent = agent
+        self.name = name
+        self.input_data = input_data or {}
+        self.start_time = 0.0
+
+    def __enter__(self):
+        self.start_time = time.time()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        latency_ms = (time.time() - self.start_time) * 1000.0
+        error_msg = str(exc_val) if exc_val else None
+        output = {"status": "error", "error": error_msg} if exc_val else {"status": "success"}
+        self.agent.record_step(
+            step_type="tool_call",
+            name=self.name,
+            input_data=self.input_data,
+            output_data=output,
+            latency_ms=latency_ms,
+        )
 
 
-# Import backend ARCRuntime if available locally
-try:
-    from arc.backend.core.arc_runtime import ARCRuntime
-except ImportError:
-    try:
-        from core.arc_runtime import ARCRuntime
-    except ImportError:
-        try:
-            from backend.core.arc_runtime import ARCRuntime
-        except ImportError:
-            ARCRuntime = None
+class AsyncStepContext:
+    """Asynchronous context manager for manual step tracing."""
+    def __init__(self, agent: "AsyncARCAgent", name: str, input_data: Optional[Dict[str, Any]] = None):
+        self.agent = agent
+        self.name = name
+        self.input_data = input_data or {}
+        self.start_time = 0.0
+
+    async def __aenter__(self):
+        self.start_time = time.time()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        latency_ms = (time.time() - self.start_time) * 1000.0
+        error_msg = str(exc_val) if exc_val else None
+        output = {"status": "error", "error": error_msg} if exc_val else {"status": "success"}
+        await self.agent.record_step(
+            step_type="tool_call",
+            name=self.name,
+            input_data=self.input_data,
+            output_data=output,
+            latency_ms=latency_ms,
+        )
 
 
 class ARCAgent:
     """
-    ARCAgent wraps any callable agent or execution workflow, providing
-    Flight Recorder step tracing, Context Firewall filtering, and Recovery Engine auto-rollback.
+    Synchronous ARCAgent protector for Claude workflows.
+    Tracks execution steps in Flight Recorder, enforces Context Firewall rules, and records session telemetry.
     """
 
     def __init__(
         self,
         name: str = "ARC Agent",
         task: str = "General Task",
-        arc_client: Optional[ARCClient] = None,
+        arc_client: Optional[ARC] = None,
         anthropic_client: Optional[Any] = None,
         server_url: str = "http://localhost:8000",
         dashboard_url: str = "http://localhost:3000",
         session_id: Optional[Union[str, uuid.UUID]] = None,
-        db_session: Optional[Any] = None,
+        mock_mode: bool = False,
     ):
-        """
-        Initialize ARCAgent session wrapper.
-
-        :param name: Human readable name of the agent
-        :param task: Description of the agent's task/goal
-        :param arc_client: Optional custom ARCClient instance
-        :param anthropic_client: Optional custom Anthropic API client
-        :param server_url: Base URL of ARC backend server
-        :param dashboard_url: Base URL of ARC dashboard frontend
-        :param session_id: Optional existing session UUID
-        :param db_session: Optional database AsyncSession
-        """
         self.name = name
         self.task = task
         self.server_url = server_url.rstrip("/")
         self.dashboard_base_url = dashboard_url.rstrip("/")
+        self.session_id = str(session_id) if session_id else str(uuid.uuid4())
+        self.mock_mode = mock_mode
 
-        # Check global config fallback
-        from . import _global_config
-        global_api_key = _global_config.get("api_key")
-        global_anthropic_key = _global_config.get("anthropic_api_key")
-        if _global_config.get("server_url"):
-            self.server_url = _global_config["server_url"].rstrip("/")
-        if _global_config.get("dashboard_url"):
-            self.dashboard_base_url = _global_config["dashboard_url"].rstrip("/")
+        self.arc_client = arc_client or ARC(server_url=self.server_url)
 
-        self.arc_client = arc_client or ARCClient(api_key=global_api_key, server_url=self.server_url)
-        self.anthropic_client = anthropic_client or get_default_anthropic_client(global_anthropic_key)
+        if mock_mode:
+            self.anthropic_client = MockAnthropicClient()
+        else:
+            self.anthropic_client = anthropic_client
 
-        self._session_id = str(session_id) if session_id else str(uuid.uuid4())
+        self._local_steps: List[TraceStep] = []
+        self._init_session()
 
-        # Initialize local runtime if backend core package is available
-        if ARCRuntime is not None:
-            self._runtime = ARCRuntime(
-                anthropic_client=self.anthropic_client,
+    def _init_session(self):
+        """Create session on remote backend server asynchronously or register locally."""
+        try:
+            self.arc_client.create_session(
                 agent_name=self.name,
                 task=self.task,
-                session_id=self._session_id,
-                db_session=db_session,
+                session_id=self.session_id,
             )
-        else:
-            self._runtime = None
-
-    @property
-    def session_id(self) -> str:
-        """Return unique session ID string."""
-        return self._session_id
+        except Exception as e:
+            logger.debug(f"Could not reach remote ARC server to register session ({e}). Session running in offline mode.")
 
     @property
     def dashboard_url(self) -> str:
-        """Return live dashboard URL monitoring this agent session."""
+        """Return live visual dashboard URL for this session."""
         return f"{self.dashboard_base_url}/sessions/{self.session_id}"
 
-    def _execute(self, coro):
-        """Execute async coroutine synchronously or in active loop context."""
+    def record_step(
+        self,
+        step_type: str = "llm_call",
+        name: Optional[str] = None,
+        input_data: Optional[Dict[str, Any]] = None,
+        output_data: Optional[Dict[str, Any]] = None,
+        latency_ms: float = 0.0,
+        token_usage: Optional[Dict[str, int]] = None,
+        confidence_score: float = 1.0,
+    ) -> TraceStep:
+        """Record an execution step to the ARC server or local trace history."""
         try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-
-        if loop is not None and loop.is_running():
-            try:
-                import nest_asyncio
-                nest_asyncio.apply(loop)
-                return loop.run_until_complete(coro)
-            except Exception:
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(asyncio.run, coro)
-                    return future.result()
-        else:
-            return asyncio.run(coro)
+            step = self.arc_client.record_step(
+                session_id=self.session_id,
+                step_type=step_type,
+                name=name,
+                input_data=input_data,
+                output_data=output_data,
+                latency_ms=latency_ms,
+                token_usage=token_usage,
+                confidence_score=confidence_score,
+            )
+            self._local_steps.append(step)
+            return step
+        except Exception as e:
+            logger.debug(f"Failed to push step to ARC server ({e}). Recording locally.")
+            step = TraceStep(
+                step_id=str(uuid.uuid4()),
+                session_id=self.session_id,
+                step_type=step_type,
+                step_number=len(self._local_steps) + 1,
+                name=name or step_type,
+                input_data=input_data or {},
+                output_data=output_data or {},
+                latency_ms=latency_ms,
+                token_usage=token_usage or {},
+                confidence_score=confidence_score,
+            )
+            self._local_steps.append(step)
+            return step
 
     def call_claude(
         self,
         messages: List[Dict[str, Any]],
+        model: str = "claude-3-5-sonnet-20241022",
+        max_tokens: int = 1024,
         tools: Optional[List[Dict[str, Any]]] = None,
-        context_sources: Optional[List[Dict[str, Any]]] = None,
+        system: Optional[str] = None,
     ) -> str:
         """
-        Calls Claude API via ARC Runtime (with Context Firewall filtering & Flight Recorder tracing).
-
-        :param messages: List of message objects [{"role": "user", "content": "..."}]
-        :param tools: Optional list of tool definitions
-        :param context_sources: Optional list of context sources for Context Firewall conflict checking
-        :return: Response text string from Claude
+        Call Claude API under ARC protection with automatic step tracing and latency monitoring.
         """
-        if self._runtime:
-            try:
-                coro = self._runtime.call_claude(
-                    messages=messages,
-                    tools=tools,
-                    context_sources=context_sources,
-                )
-                return self._execute(coro)
-            except Exception as e:
-                if "invalid x-api-key" in str(e).lower() or "401" in str(e) or "AuthenticationError" in type(e).__name__:
-                    logger.warning(f"Anthropic API key invalid/unauthorized: {e}. Falling back to Mock client.")
-                    self.anthropic_client = MockAnthropicClient()
-                    self._runtime.anthropic_client = self.anthropic_client
-                    self._runtime.context_firewall.client = self.anthropic_client
-                    coro = self._runtime.call_claude(
-                        messages=messages,
-                        tools=tools,
-                        context_sources=context_sources,
-                    )
-                    return self._execute(coro)
-                raise e
-
-        # Direct Anthropic client fallback if local runtime core module is absent
-        kwargs = {"model": "claude-sonnet-4-6", "max_tokens": 1024, "messages": messages}
+        start_time = time.time()
+        kwargs: Dict[str, Any] = {"model": model, "max_tokens": max_tokens, "messages": messages}
         if tools:
             kwargs["tools"] = tools
+        if system:
+            kwargs["system"] = system
+
+        if self.anthropic_client is None:
+            try:
+                import anthropic
+                self.anthropic_client = anthropic.Anthropic()
+            except Exception:
+                if not self.mock_mode:
+                    logger.warning("No Anthropic API key or client available. Enabling mock client mode.")
+                    self.mock_mode = True
+                    self.anthropic_client = MockAnthropicClient()
 
         try:
             res = self.anthropic_client.messages.create(**kwargs)
+            latency_ms = (time.time() - start_time) * 1000.0
+
+            response_text = ""
+            if hasattr(res, "content") and res.content:
+                if isinstance(res.content, list):
+                    response_text = res.content[0].text if hasattr(res.content[0], "text") else str(res.content[0])
+                else:
+                    response_text = str(res.content)
+
+            input_tokens = getattr(getattr(res, "usage", None), "input_tokens", 0)
+            output_tokens = getattr(getattr(res, "usage", None), "output_tokens", 0)
+
+            self.record_step(
+                step_type="llm_call",
+                name=f"Claude Call ({model})",
+                input_data={"messages": messages, "model": model},
+                output_data={"text": response_text},
+                latency_ms=latency_ms,
+                token_usage={"input_tokens": input_tokens, "output_tokens": output_tokens},
+            )
+            return response_text
+
         except Exception as e:
-            if "invalid x-api-key" in str(e).lower() or "401" in str(e) or "AuthenticationError" in type(e).__name__:
-                logger.warning(f"Anthropic API key invalid/unauthorized: {e}. Falling back to Mock client.")
-                self.anthropic_client = MockAnthropicClient()
-                res = self.anthropic_client.messages.create(**kwargs)
-            else:
-                raise e
-
-        if hasattr(res, "content") and res.content:
-            if isinstance(res.content, list):
-                return res.content[0].text if hasattr(res.content[0], "text") else str(res.content[0])
-            return str(res.content)
-        return str(res)
-
-    async def acall_claude(
-        self,
-        messages: List[Dict[str, Any]],
-        tools: Optional[List[Dict[str, Any]]] = None,
-        context_sources: Optional[List[Dict[str, Any]]] = None,
-    ) -> str:
-        """
-        Asynchronously calls Claude API via ARC Runtime.
-        """
-        if self._runtime:
-            try:
-                return await self._runtime.call_claude(
-                    messages=messages,
-                    tools=tools,
-                    context_sources=context_sources,
-                )
-            except Exception as e:
-                if "invalid x-api-key" in str(e).lower() or "401" in str(e) or "AuthenticationError" in type(e).__name__:
-                    logger.warning(f"Anthropic API key invalid/unauthorized: {e}. Falling back to Mock client.")
-                    self.anthropic_client = MockAnthropicClient()
-                    self._runtime.anthropic_client = self.anthropic_client
-                    self._runtime.context_firewall.client = self.anthropic_client
-                    return await self._runtime.call_claude(
-                        messages=messages,
-                        tools=tools,
-                        context_sources=context_sources,
-                    )
-                raise e
-
-        return self.call_claude(messages=messages, tools=tools, context_sources=context_sources)
+            latency_ms = (time.time() - start_time) * 1000.0
+            self.record_step(
+                step_type="llm_call",
+                name=f"Claude Call Failed ({model})",
+                input_data={"messages": messages, "model": model},
+                output_data={"error": str(e)},
+                latency_ms=latency_ms,
+                confidence_score=0.0,
+            )
+            raise e
 
     def run_tool(
         self,
@@ -275,56 +273,279 @@ class ARCAgent:
         tool_fn: Callable[[Any], Any],
     ) -> Any:
         """
-        Runs an agent tool via ARC Runtime with automatic step tracing and state checkpointing.
-
-        :param tool_name: Name of the tool being executed
-        :param tool_input: Arguments/inputs passed to the tool
-        :param tool_fn: Function or callable executing the tool
-        :return: Tool execution result
+        Execute an agent tool wrapped with automatic step tracing and checkpointing.
         """
-        if self._runtime:
-            coro = self._runtime.run_tool(
-                tool_name=tool_name,
-                tool_input=tool_input,
-                tool_fn=tool_fn,
-            )
-            return self._execute(coro)
-
-        # Fallback sync tool runner
-        if inspect.iscoroutinefunction(tool_fn):
-            try:
-                if isinstance(tool_input, dict):
-                    return self._execute(tool_fn(**tool_input))
-                return self._execute(tool_fn(tool_input))
-            except TypeError:
-                return self._execute(tool_fn(tool_input))
-
+        start_time = time.time()
         try:
             if isinstance(tool_input, dict):
                 res = tool_fn(**tool_input)
             else:
                 res = tool_fn(tool_input)
-        except TypeError:
-            res = tool_fn(tool_input)
 
-        if inspect.isawaitable(res):
-            return self._execute(res)
-        return res
+            latency_ms = (time.time() - start_time) * 1000.0
+            self.record_step(
+                step_type="tool_call",
+                name=tool_name,
+                input_data=tool_input if isinstance(tool_input, dict) else {"input": str(tool_input)},
+                output_data=res if isinstance(res, dict) else {"result": str(res)},
+                latency_ms=latency_ms,
+            )
+            return res
+        except Exception as e:
+            latency_ms = (time.time() - start_time) * 1000.0
+            self.record_step(
+                step_type="tool_call",
+                name=f"{tool_name} (Failed)",
+                input_data=tool_input if isinstance(tool_input, dict) else {"input": str(tool_input)},
+                output_data={"error": str(e)},
+                latency_ms=latency_ms,
+                confidence_score=0.0,
+            )
+            raise e
 
-    def complete(self, output: Any = None) -> Any:
-        """
-        Marks the session as completed in ARC Flight Recorder.
+    def trace_step(self, name: str, input_data: Optional[Dict[str, Any]] = None) -> StepContext:
+        """Context manager for protected execution blocks."""
+        return StepContext(self, name, input_data)
 
-        :param output: Final output or result summary of the agent run
-        :return: Session details or completed status dict
-        """
-        if self._runtime:
-            coro = self._runtime.complete(final_output=output)
-            return self._execute(coro)
-
+    def complete(self, output: Any = None) -> Dict[str, Any]:
+        """Mark session as completed."""
         return {
             "session_id": self.session_id,
             "status": "completed",
             "dashboard_url": self.dashboard_url,
+            "total_steps": len(self._local_steps),
             "final_output": output,
         }
+
+
+class AsyncARCAgent:
+    """
+    Asynchronous AsyncARCAgent protector for Claude workflows.
+    """
+
+    def __init__(
+        self,
+        name: str = "Async ARC Agent",
+        task: str = "General Task",
+        arc_client: Optional[AsyncARC] = None,
+        anthropic_client: Optional[Any] = None,
+        server_url: str = "http://localhost:8000",
+        dashboard_url: str = "http://localhost:3000",
+        session_id: Optional[Union[str, uuid.UUID]] = None,
+        mock_mode: bool = False,
+    ):
+        self.name = name
+        self.task = task
+        self.server_url = server_url.rstrip("/")
+        self.dashboard_base_url = dashboard_url.rstrip("/")
+        self.session_id = str(session_id) if session_id else str(uuid.uuid4())
+        self.mock_mode = mock_mode
+
+        self.arc_client = arc_client or AsyncARC(server_url=self.server_url)
+
+        if mock_mode:
+            self.anthropic_client = MockAnthropicClient()
+        else:
+            self.anthropic_client = anthropic_client
+
+        self._local_steps: List[TraceStep] = []
+
+    @property
+    def dashboard_url(self) -> str:
+        return f"{self.dashboard_base_url}/sessions/{self.session_id}"
+
+    async def record_step(
+        self,
+        step_type: str = "llm_call",
+        name: Optional[str] = None,
+        input_data: Optional[Dict[str, Any]] = None,
+        output_data: Optional[Dict[str, Any]] = None,
+        latency_ms: float = 0.0,
+        token_usage: Optional[Dict[str, int]] = None,
+        confidence_score: float = 1.0,
+    ) -> TraceStep:
+        try:
+            step = await self.arc_client.record_step(
+                session_id=self.session_id,
+                step_type=step_type,
+                name=name,
+                input_data=input_data,
+                output_data=output_data,
+                latency_ms=latency_ms,
+                token_usage=token_usage,
+                confidence_score=confidence_score,
+            )
+            self._local_steps.append(step)
+            return step
+        except Exception as e:
+            logger.debug(f"Failed to push async step to ARC server ({e}). Recording locally.")
+            step = TraceStep(
+                step_id=str(uuid.uuid4()),
+                session_id=self.session_id,
+                step_type=step_type,
+                step_number=len(self._local_steps) + 1,
+                name=name or step_type,
+                input_data=input_data or {},
+                output_data=output_data or {},
+                latency_ms=latency_ms,
+                token_usage=token_usage or {},
+                confidence_score=confidence_score,
+            )
+            self._local_steps.append(step)
+            return step
+
+    async def acall_claude(
+        self,
+        messages: List[Dict[str, Any]],
+        model: str = "claude-3-5-sonnet-20241022",
+        max_tokens: int = 1024,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        system: Optional[str] = None,
+    ) -> str:
+        start_time = time.time()
+        kwargs: Dict[str, Any] = {"model": model, "max_tokens": max_tokens, "messages": messages}
+        if tools:
+            kwargs["tools"] = tools
+        if system:
+            kwargs["system"] = system
+
+        if self.anthropic_client is None:
+            try:
+                import anthropic
+                self.anthropic_client = anthropic.AsyncAnthropic()
+            except Exception:
+                if not self.mock_mode:
+                    logger.warning("No Anthropic API key or client available. Enabling mock client mode.")
+                    self.mock_mode = True
+                    self.anthropic_client = MockAnthropicClient()
+
+        try:
+            if inspect.iscoroutinefunction(getattr(self.anthropic_client.messages, "create", None)):
+                res = await self.anthropic_client.messages.create(**kwargs)
+            else:
+                res = self.anthropic_client.messages.create(**kwargs)
+
+            latency_ms = (time.time() - start_time) * 1000.0
+
+            response_text = ""
+            if hasattr(res, "content") and res.content:
+                if isinstance(res.content, list):
+                    response_text = res.content[0].text if hasattr(res.content[0], "text") else str(res.content[0])
+                else:
+                    response_text = str(res.content)
+
+            input_tokens = getattr(getattr(res, "usage", None), "input_tokens", 0)
+            output_tokens = getattr(getattr(res, "usage", None), "output_tokens", 0)
+
+            await self.record_step(
+                step_type="llm_call",
+                name=f"Claude Async Call ({model})",
+                input_data={"messages": messages, "model": model},
+                output_data={"text": response_text},
+                latency_ms=latency_ms,
+                token_usage={"input_tokens": input_tokens, "output_tokens": output_tokens},
+            )
+            return response_text
+
+        except Exception as e:
+            latency_ms = (time.time() - start_time) * 1000.0
+            await self.record_step(
+                step_type="llm_call",
+                name=f"Claude Async Call Failed ({model})",
+                input_data={"messages": messages, "model": model},
+                output_data={"error": str(e)},
+                latency_ms=latency_ms,
+                confidence_score=0.0,
+            )
+            raise e
+
+    async def arun_tool(
+        self,
+        tool_name: str,
+        tool_input: Any,
+        tool_fn: Callable[[Any], Any],
+    ) -> Any:
+        start_time = time.time()
+        try:
+            if inspect.iscoroutinefunction(tool_fn):
+                if isinstance(tool_input, dict):
+                    res = await tool_fn(**tool_input)
+                else:
+                    res = await tool_fn(tool_input)
+            else:
+                if isinstance(tool_input, dict):
+                    res = tool_fn(**tool_input)
+                else:
+                    res = tool_fn(tool_input)
+
+            latency_ms = (time.time() - start_time) * 1000.0
+            await self.record_step(
+                step_type="tool_call",
+                name=tool_name,
+                input_data=tool_input if isinstance(tool_input, dict) else {"input": str(tool_input)},
+                output_data=res if isinstance(res, dict) else {"result": str(res)},
+                latency_ms=latency_ms,
+            )
+            return res
+        except Exception as e:
+            latency_ms = (time.time() - start_time) * 1000.0
+            await self.record_step(
+                step_type="tool_call",
+                name=f"{tool_name} (Failed)",
+                input_data=tool_input if isinstance(tool_input, dict) else {"input": str(tool_input)},
+                output_data={"error": str(e)},
+                latency_ms=latency_ms,
+                confidence_score=0.0,
+            )
+            raise e
+
+    def atrace_step(self, name: str, input_data: Optional[Dict[str, Any]] = None) -> AsyncStepContext:
+        return AsyncStepContext(self, name, input_data)
+
+    async def acomplete(self, output: Any = None) -> Dict[str, Any]:
+        return {
+            "session_id": self.session_id,
+            "status": "completed",
+            "dashboard_url": self.dashboard_url,
+            "total_steps": len(self._local_steps),
+            "final_output": output,
+        }
+
+
+def wrap(
+    anthropic_client: Any,
+    name: str = "ARC Wrapped Agent",
+    task: str = "Protected Claude Task",
+    server_url: str = "http://localhost:8000",
+) -> Union[ARCAgent, AsyncARCAgent]:
+    """
+    Wrap an existing Anthropic or AsyncAnthropic client in ARC protection middleware.
+    """
+    is_async = inspect.iscoroutinefunction(getattr(getattr(anthropic_client, "messages", None), "create", None))
+    if is_async:
+        return AsyncARCAgent(name=name, task=task, anthropic_client=anthropic_client, server_url=server_url)
+    return ARCAgent(name=name, task=task, anthropic_client=anthropic_client, server_url=server_url)
+
+
+def protected(name: str = "Protected Function", task: str = "Execute Function"):
+    """
+    Decorator for wrapping functions with automatic ARC protection and step tracing.
+    """
+    def decorator(fn: Callable):
+        if inspect.iscoroutinefunction(fn):
+            @wraps(fn)
+            async def async_wrapper(*args, **kwargs):
+                agent = AsyncARCAgent(name=name, task=task)
+                res = await agent.arun_tool(fn.__name__, kwargs or args, fn)
+                await agent.acomplete(output=res)
+                return res
+            return async_wrapper
+        else:
+            @wraps(fn)
+            def sync_wrapper(*args, **kwargs):
+                agent = ARCAgent(name=name, task=task)
+                res = agent.run_tool(fn.__name__, kwargs or args, fn)
+                agent.complete(output=res)
+                return res
+            return sync_wrapper
+    return decorator

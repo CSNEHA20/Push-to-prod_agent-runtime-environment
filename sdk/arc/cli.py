@@ -1,23 +1,38 @@
 """
-ARC SDK — Command Line Interface (CLI)
-Provides the `arc` terminal command for inspecting, tracing, replaying, recovering, and running ARC sessions.
+ARC SDK - Command Line Interface (CLI).
+Provides the `arc` terminal utility for monitoring, inspecting, tracing, replaying, recovering, and verifying agent sessions.
 """
 
 import sys
 import json
 import argparse
-from typing import Optional
+from typing import Any, Optional, List, Dict
 
 from .version import __version__
-from . import init, trace, replay, inspect as inspect_session, recover, verify, Client
+from .client import ARC
+from .exceptions import ARCError
 
 
-def print_json(data: Any):
+def print_json(data: Any) -> None:
     """Format and print JSON output nicely to stdout."""
+    if hasattr(data, "to_dict"):
+        data = data.to_dict()
+    elif hasattr(data, "model_dump"):
+        data = data.model_dump()
+    elif isinstance(data, list):
+        data = [item.to_dict() if hasattr(item, "to_dict") else item for item in data]
     print(json.dumps(data, indent=2, default=str))
 
 
-def cmd_init(args: argparse.Namespace):
+def get_client_from_args(args: argparse.Namespace) -> ARC:
+    """Instantiate ARC client using CLI arguments or environment variables."""
+    return ARC(
+        server_url=args.server_url,
+        api_key=args.api_key,
+    )
+
+
+def cmd_init(args: argparse.Namespace) -> None:
     """Handle `arc init` subcommand."""
     config_file = ".arc.json"
     config = {
@@ -30,59 +45,64 @@ def cmd_init(args: argparse.Namespace):
     print(f"[OK] Initialized ARC SDK configuration in '{config_file}'.")
 
 
-def cmd_trace(args: argparse.Namespace):
+def cmd_trace(args: argparse.Namespace) -> None:
     """Handle `arc trace <session_id>` subcommand."""
-    client = Client(server_url=args.server_url)
+    client = get_client_from_args(args)
     res = client.get_trace(args.session_id)
     print_json(res)
 
 
-def cmd_replay(args: argparse.Namespace):
+def cmd_replay(args: argparse.Namespace) -> None:
     """Handle `arc replay <session_id>` subcommand."""
-    client = Client(server_url=args.server_url)
+    client = get_client_from_args(args)
     res = client.get_replay(args.session_id)
     print_json(res)
 
 
-def cmd_inspect(args: argparse.Namespace):
+def cmd_inspect(args: argparse.Namespace) -> None:
     """Handle `arc inspect <session_id>` subcommand."""
-    client = Client(server_url=args.server_url)
+    client = get_client_from_args(args)
     res = client.get_session(args.session_id)
     print_json(res)
 
 
-def cmd_recover(args: argparse.Namespace):
+def cmd_recover(args: argparse.Namespace) -> None:
     """Handle `arc recover <session_id>` subcommand."""
-    client = Client(server_url=args.server_url)
+    client = get_client_from_args(args)
     res = client.get_recovery(args.session_id)
     print_json(res)
 
 
-def cmd_verify(args: argparse.Namespace):
+def cmd_verify(args: argparse.Namespace) -> None:
     """Handle `arc verify <session_id>` subcommand."""
-    client = Client(server_url=args.server_url)
+    client = get_client_from_args(args)
     res = client.verify_session(args.session_id)
     print_json(res)
 
 
-def cmd_version(args: argparse.Namespace):
-    """Handle `arc version` or `arc --version`."""
+def cmd_version(args: argparse.Namespace) -> None:
+    """Handle `arc version`."""
     print(f"ARC SDK v{__version__}")
 
 
-def main():
+def main() -> None:
     """Main CLI entrypoint for `arc` command."""
     parser = argparse.ArgumentParser(
         prog="arc",
-        description="Agent Runtime Core (ARC) CLI — Monitoring & Reliability Tooling for Claude Agents",
+        description="Agent Runtime Core (ARC) CLI - Monitoring & Reliability Tooling for Claude Agents",
     )
     parser.add_argument(
         "-v", "--version", action="version", version=f"ARC SDK v{__version__}"
     )
     parser.add_argument(
         "--server-url",
-        default="http://localhost:8000",
+        default=None,
         help="ARC Backend server URL (default: http://localhost:8000)",
+    )
+    parser.add_argument(
+        "--api-key",
+        default=None,
+        help="ARC API authentication key",
     )
 
     subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
