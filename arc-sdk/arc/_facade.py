@@ -31,7 +31,10 @@ from .integrations.anthropic.wrapper import (
     AnthropicClientWrapper,
     AsyncAnthropicClientWrapper,
 )
+from .runtime.graph import ExecutionGraph
+from .runtime.graph.builder import build_execution_graph
 from .runtime.planner import Planner
+from .runtime.verification import VerificationEngine, Verifier
 from .types import (
     EventHandler,
     ExecutionPlan,
@@ -79,6 +82,7 @@ class ARC:
         dashboard_url: Optional[str] = None,
         config: Optional[ARCConfig] = None,
         planner: Optional[Planner] = None,
+        verifiers: Optional[List[Verifier]] = None,
         **options: Any,
     ) -> None:
         self._provider_client = client
@@ -97,6 +101,7 @@ class ARC:
             get_middleware=lambda: list(self._middleware),
             get_handlers=lambda name: list(self._event_handlers.get(name, [])),
             planner=planner,
+            verifiers=verifiers,
         )
 
     # -- transport interception ------------------------------------------
@@ -156,6 +161,20 @@ class ARC:
     def planner(self, planner: Planner) -> None:
         self._runtime.planner = planner
 
+    @property
+    def verification(self) -> VerificationEngine:
+        """The Verification Engine that derives confidence from evidence."""
+        return self._runtime.verification
+
+    def verifier(self, verifier: Verifier) -> Verifier:
+        """Register a verification plugin; usable directly or as a decorator.
+
+        >>> arc.verifier(JSONSchemaVerifier(schema))              # doctest: +SKIP
+        >>> arc.verifier(AssertionVerifier({"has_price": ...}))   # doctest: +SKIP
+        """
+        self._runtime.verification.register(verifier)
+        return verifier
+
     def plan(self, **request: Any) -> ExecutionPlan:
         """Preview the execution plan for a request without calling the model.
 
@@ -170,6 +189,17 @@ class ARC:
             context_sources=list(context_sources),
         )
         return self._runtime.planner.plan(ctx)
+
+    def graph(self, **request: Any) -> ExecutionGraph:
+        """Preview the execution graph a request would run through.
+
+        The graph — not this facade — is the source of truth for runtime
+        behaviour: which nodes exist (firewall, dispatch, record, verify,
+        recover, replay) is derived entirely from the plan. No model call is made.
+        """
+        streaming = request.pop("stream", None) is True
+        plan = self.plan(**request)
+        return build_execution_graph(plan, observable=not streaming, streaming=streaming)
 
     @property
     def middlewares(self) -> List[Middleware]:

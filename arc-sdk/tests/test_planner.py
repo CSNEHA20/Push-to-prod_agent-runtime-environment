@@ -124,8 +124,12 @@ def test_plan_recorded_on_step() -> None:
 
 
 def test_plan_drives_retry_on_strict_low_confidence() -> None:
-    client = FakeClient(reply="ok.")  # short reply -> confidence 0.6 < strict 0.7
+    from arc import AssertionVerifier
+
+    client = FakeClient(reply="ok.")
     arc = ARC(client, auto_recover=True)
+    # A verifier the response fails makes STRICT verification fail -> retry.
+    arc.verifier(AssertionVerifier({"has_answer": lambda text: "spaceship" in text}))
     arc.messages.create(model="m", max_tokens=16000, messages=SHORT, tools=TOOLS)
     # STRICT verification + RETRY_ONCE -> exactly one retry (two provider calls).
     assert len(client.messages.calls) == 2

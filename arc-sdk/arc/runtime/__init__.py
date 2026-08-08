@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from .events import EventBus
 from .firewall import Firewall
+from .graph import ExecutionGraph, ExecutionNode, GraphBus, GraphExecutor, NodeKind
 from .middleware import MiddlewarePipeline
 from .planner import Planner
 from .plugins import PluginRegistry
@@ -41,4 +42,9 @@ __all__ = [
     "MiddlewarePipeline",
     "EventBus",
     "ReplayStore",
+    "ExecutionGraph",
+    "ExecutionNode",
+    "NodeKind",
+    "GraphBus",
+    "GraphExecutor",
 ]

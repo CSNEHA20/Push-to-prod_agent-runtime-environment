@@ -1,15 +1,20 @@
-"""ARC Runtime — the interception orchestrator.
+"""ARC Runtime — the graph-driven interception orchestrator.
 
-Every intercepted provider call flows through :meth:`ARCRuntime.run_create`
-(sync) or :meth:`ARCRuntime.async_run_create` (async), which thread the
-request through the full pipeline before and after the real provider call::
+Every model request is compiled by the Adaptive Planner into an
+:class:`~arc.runtime.graph.ExecutionGraph`, which is the **source of truth** for
+runtime behaviour. A :class:`~arc.runtime.graph.executor.EventDrivenGraphExecutor`
+walks that graph and publishes events on an internal
+:class:`~arc.runtime.graph.bus.InProcessGraphBus`; the runtime services
+(firewall, recorder, verifier, recovery, replay) **subscribe** to those events
+and coordinate only through a shared ``ExecutionContext`` — they never call one
+another directly. The end-to-end shape remains::
 
-    Middleware -> Context Firewall -> Event Bus -> Flight Recorder
-      -> Verification -> Recovery -> [provider SDK] -> Replay Store -> Dashboard
+    Middleware -> [graph: firewall -> dispatch -> record -> verify -> recover
+                   -> replay] -> Dashboard
 
 The provider's response object is returned to the caller **unchanged** — the
-runtime only observes it (text, token usage, tool/stop/thinking metadata) for
-recording. Both sync and async Anthropic client shapes are supported.
+runtime only observes it for recording. Both sync and async Anthropic client
+shapes are supported, including streaming, tool use, and MCP.
 """
 
 from __future__ import annotations
@@ -19,14 +24,23 @@ import uuid
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .config import ARCConfig
+from .integrations.adapter import make_provider_adapter
 from .runtime.events.default import DefaultEventBus
 from .runtime.firewall.default import ContextFirewall
+from .runtime.graph import ExecutionContext, ExecutionGraph
+from .runtime.graph.builder import build_execution_graph
+from .runtime.graph.bus import InProcessGraphBus
+from .runtime.graph.executor import EventDrivenGraphExecutor
+from .runtime.graph.services import RuntimeServices
 from .runtime.middleware.default import MiddlewarePipeline
 from .runtime.planner import Planner
 from .runtime.planner.default import AdaptivePlanner, make_planner_middleware
 from .runtime.recorder.default import FlightRecorder
 from .runtime.recovery.default import RecoveryEngine
 from .runtime.replay import DefaultReplayStore
+from .runtime.verification import Verifier
+from .runtime.verification.engine import DefaultVerificationEngine
+from .runtime.verification.plugins import ResponseIntegrityVerifier
 from .runtime.verifier.default import ConfidenceVerifier
 from .types import (
     Event,
@@ -34,13 +48,10 @@ from .types import (
     EventType,
     ExecutionPlan,
     Middleware,
-    RecoveryPolicy,
     RequestContext,
     ResponseContext,
     StepType,
     TraceStep,
-    VerificationResult,
-    VerificationStrategy,
 )
 
 _STRICT_MIN_CONFIDENCE = 0.7
@@ -134,21 +145,51 @@ class ARCRuntime:
         get_middleware: Callable[[], List[Middleware]],
         get_handlers: Callable[[str], List[EventHandler]],
         planner: Optional[Planner] = None,
+        verifiers: Optional[List[Verifier]] = None,
     ) -> None:
         self.config = config
         self.session_id = str(uuid.uuid4())
         self.recorder = FlightRecorder()
         self.firewall = ContextFirewall()
         self.recovery = RecoveryEngine()
+        # Verification Engine: confidence is derived from these checks. The
+        # structural integrity verifier always runs; developers register more.
+        self.verification = DefaultVerificationEngine(
+            [ResponseIntegrityVerifier(), *(verifiers or [])]
+        )
+        # Retained for the read-side `arc.verify()` API over recorded steps.
         self.verifier = ConfidenceVerifier(config.confidence_threshold)
         self.events = DefaultEventBus(get_handlers)
         self.planner: Planner = planner or AdaptivePlanner(config)
-        self._stream_plans: Dict[int, ExecutionPlan] = {}
         # The Adaptive Planner is the first (outermost) middleware; user
         # middleware runs inside it, so everything follows the plan.
         planner_mw = make_planner_middleware(lambda: self.planner, self.events.emit)
         self.pipeline = MiddlewarePipeline(lambda: [planner_mw, *get_middleware()])
         self.replay = DefaultReplayStore(self.recorder, self.recovery, config.confidence_threshold)
+
+        # Graph subsystem: the executor walks planner-generated graphs and the
+        # services subscribe to its events (no direct engine-to-engine calls).
+        self._graph_bus = InProcessGraphBus()
+        self._services = RuntimeServices(
+            recorder=self.recorder,
+            firewall=self.firewall,
+            engine=self.verification,
+            recovery=self.recovery,
+            replay=self.replay,
+            emit_user=self.events.emit,
+            dashboard_url=lambda: self.dashboard_url,
+            extract_response=extract_response,
+            confidence_threshold=config.confidence_threshold,
+            strict_min_confidence=_STRICT_MIN_CONFIDENCE,
+        )
+        self._services.register(self._graph_bus)
+        # Provider adapter: translates abstract graph decisions into provider
+        # SDK kwargs (e.g. thinking budget → Anthropic `thinking` param).
+        _adapter = make_provider_adapter(config.provider)
+        self.executor = EventDrivenGraphExecutor(
+            self._graph_bus, self.recorder.next_step_number, adapter=_adapter
+        )
+        self._stream_contexts: Dict[int, ExecutionContext] = {}
 
     @property
     def dashboard_url(self) -> str:
@@ -163,127 +204,33 @@ class ARCRuntime:
         invoke: Invoke,
         context_sources: Optional[List[Dict[str, Any]]] = None,
     ) -> Any:
-        """Run one ``messages.create`` through the full pipeline; return the raw response."""
+        """Run one ``messages.create`` through the graph; return the raw response.
+
+        The middleware onion (planner first) wraps graph compilation; the graph
+        is then executed by the event-driven executor.
+        """
         request = RequestContext(
             session_id=self.session_id,
             provider=self.config.provider,
             payload=payload,
             context_sources=list(context_sources or []),
         )
-        streaming = payload.get("stream") is True
+        observable = payload.get("stream") is not True
         response_ctx = self.pipeline.execute(
-            request, lambda req: self._core(req, invoke, streaming)
+            request, lambda req: self._graph_core(req, invoke, observable)
         )
         return response_ctx.metadata["raw_response"]
 
-    def _core(self, req: RequestContext, invoke: Invoke, streaming: bool) -> ResponseContext:
-        step_number = self.recorder.next_step_number(req.session_id)
-        _, conflicts = self.firewall.filter(req.context_sources)
-        self.events.emit(
-            Event(
-                type="request_started",
-                session_id=req.session_id,
-                payload={"step_number": step_number, "conflicts": len(conflicts)},
-            )
-        )
-        self.recovery.checkpoint(req.session_id, step_number, {"step": step_number})
-        input_summary = self._input_summary(req.payload)
-
-        start = time.perf_counter()
-        try:
-            raw = invoke(req.payload)
-        except Exception as exc:  # noqa: BLE001 - record then re-raise unchanged
-            latency = (time.perf_counter() - start) * 1000.0
-            self._record_failure(req.session_id, step_number, input_summary, str(exc), latency)
-            raise
-
-        latency = (time.perf_counter() - start) * 1000.0
-        if streaming:
-            return self._record_streamed_iterator(
-                req, step_number, input_summary, latency, raw
-            )
-        return self._record_message(
-            req, step_number, input_summary, latency, raw, invoke
-        )
-
-    def _record_message(
-        self,
-        req: RequestContext,
-        step_number: int,
-        input_summary: Dict[str, Any],
-        latency: float,
-        raw: Any,
-        invoke: Invoke,
+    def _graph_core(
+        self, req: RequestContext, invoke: Invoke, observable: bool
     ) -> ResponseContext:
-        text, usage, tools, stop_reason, has_thinking = extract_response(raw)
-        plan: Optional[ExecutionPlan] = req.metadata.get("execution_plan")
-        step = self.recorder.record(
-            self.recorder.build_step(
-                req.session_id,
-                step_number,
-                name=f"messages.create ({req.payload.get('model', '?')})",
-                input_data={**input_summary, "plan": plan.to_dict() if plan else None},
-                output_text=text,
-                output_data={
-                    "tools": tools,
-                    "stop_reason": stop_reason,
-                    "has_thinking": has_thinking,
-                },
-                token_usage=usage,
-                latency_ms=latency,
-            )
-        )
-        result = self._verify_with_plan([step], plan)
-        if not result.is_valid:
-            self.events.emit(
-                Event(
-                    type=EventType.VERIFICATION_FAILED.value,
-                    session_id=req.session_id,
-                    payload={"step_number": step_number, "conflicts": len(result.conflicts)},
-                )
-            )
-            if self._retry_allowed(plan, req):
-                self._emit_recovery(req.session_id, step_number)
-                retry = req.model_copy(
-                    update={"metadata": {**req.metadata, "_arc_retry": True}}
-                )
-                return self._core(retry, invoke, streaming=False)
-            if self._checkpoint_recovery(plan):
-                self._emit_recovery(req.session_id, step_number)
-        self._emit_recorded(req.session_id, step)
+        ctx = self._new_context(req, streaming=False, observable=observable, is_async=False)
+        self.executor.execute(ctx, invoke)
         return ResponseContext(
             session_id=req.session_id,
-            output={"text": text},
-            step=step,
-            metadata={"raw_response": raw},
-        )
-
-    def _record_streamed_iterator(
-        self,
-        req: RequestContext,
-        step_number: int,
-        input_summary: Dict[str, Any],
-        latency: float,
-        raw: Any,
-    ) -> ResponseContext:
-        # Low-level stream=True: consuming the iterator would break the caller,
-        # so record request metadata only and pass the iterator through.
-        step = self.recorder.record(
-            self.recorder.build_step(
-                req.session_id,
-                step_number,
-                name="messages.create (stream)",
-                input_data=input_summary,
-                output_data={"streamed": True},
-                latency_ms=latency,
-            )
-        )
-        self._emit_recorded(req.session_id, step)
-        return ResponseContext(
-            session_id=req.session_id,
-            output={"streamed": True},
-            step=step,
-            metadata={"raw_response": raw},
+            output={"observable": observable},
+            step=ctx.step,
+            metadata={"raw_response": ctx.response},
         )
 
     # -- streaming (context-manager) -------------------------------------
@@ -291,37 +238,17 @@ class ARCRuntime:
     def begin_stream(
         self, payload: Dict[str, Any], context_sources: Optional[List[Dict[str, Any]]]
     ) -> int:
-        """Plan the stream and run its pre-dispatch stages; return its step number.
+        """Compile the stream graph and run its pre-dispatch nodes.
 
         Streams bypass the middleware onion, so the planner is invoked directly
-        here to honour "plan before every request reaches the model".
+        (via :meth:`_new_context`) to honour "plan before the request reaches
+        the model". Returns the step number, used to correlate finish_stream.
         """
-        step_number = self.recorder.next_step_number(self.session_id)
-        request = RequestContext(
-            session_id=self.session_id,
-            provider=self.config.provider,
-            payload=payload,
-            context_sources=list(context_sources or []),
-        )
-        plan = self.planner.plan(request)
-        self._stream_plans[step_number] = plan
-        self.events.emit(
-            Event(
-                type=EventType.PLAN_CREATED.value,
-                session_id=self.session_id,
-                payload=plan.to_dict(),
-            )
-        )
-        _, conflicts = self.firewall.filter(request.context_sources)
-        self.events.emit(
-            Event(
-                type="request_started",
-                session_id=self.session_id,
-                payload={"step_number": step_number, "streaming": True, "conflicts": len(conflicts)},
-            )
-        )
-        self.recovery.checkpoint(self.session_id, step_number, {"step": step_number})
-        return step_number
+        request = self._stream_request(payload, context_sources)
+        ctx = self._new_context(request, streaming=True, observable=True, is_async=False)
+        self.executor.begin_stream(ctx)
+        self._stream_contexts[ctx.step_number] = ctx
+        return ctx.step_number
 
     def finish_stream(
         self,
@@ -330,75 +257,75 @@ class ARCRuntime:
         latency_ms: float,
         final_message: Any,
         error: Optional[str],
-    ) -> TraceStep:
-        """Run the post-dispatch stages for a stream once it has completed."""
-        plan = self._stream_plans.pop(step_number, None)
-        input_summary = {
-            **self._input_summary(payload),
-            "plan": plan.to_dict() if plan else None,
-        }
-        if error is not None:
-            return self._record_failure(
-                self.session_id, step_number, input_summary, error, latency_ms
-            )
-        text, usage, tools, stop_reason, has_thinking = extract_response(final_message)
-        step = self.recorder.record(
-            self.recorder.build_step(
-                self.session_id,
-                step_number,
-                name=f"messages.stream ({payload.get('model', '?')})",
-                input_data=input_summary,
-                output_text=text,
-                output_data={
-                    "tools": tools,
-                    "stop_reason": stop_reason,
-                    "has_thinking": has_thinking,
-                },
-                token_usage=usage,
-                latency_ms=latency_ms,
-            )
+    ) -> Optional[TraceStep]:
+        """Run the post-dispatch nodes for a stream once it has completed."""
+        ctx = self._stream_contexts.pop(step_number, None)
+        if ctx is None:  # unknown stream (defensive) — nothing to record
+            return None
+        ctx.final_message = final_message
+        ctx.error = error
+        ctx.latency_ms = latency_ms
+        self.executor.finish_stream(ctx)
+        return ctx.step
+
+    # -- graph compilation -----------------------------------------------
+
+    def _new_context(
+        self,
+        request: RequestContext,
+        *,
+        streaming: bool,
+        observable: bool,
+        is_async: bool,
+    ) -> ExecutionContext:
+        """Plan (if needed), build the graph, and assemble the execution context."""
+        plan, graph = self._compile(request, streaming=streaming, observable=observable)
+        return ExecutionContext(
+            request=request,
+            plan=plan,
+            graph=graph,
+            session_id=request.session_id,
+            input_summary=self._input_summary(request.payload),
+            observable=observable,
+            streaming=streaming,
+            is_async=is_async,
         )
-        # Streams can't be re-invoked mid-flight, so recovery here is record-only.
-        result = self._verify_with_plan([step], plan)
-        if not result.is_valid:
+
+    def _compile(
+        self, request: RequestContext, *, streaming: bool, observable: bool
+    ) -> Tuple[ExecutionPlan, ExecutionGraph]:
+        # The planner middleware (sync create) pre-plans into request.metadata;
+        # every other entrypoint plans here and emits plan_created itself.
+        plan: Optional[ExecutionPlan] = request.metadata.get("execution_plan")
+        if plan is None:
+            plan = self.planner.plan(request)
             self.events.emit(
                 Event(
-                    type=EventType.VERIFICATION_FAILED.value,
-                    session_id=self.session_id,
-                    payload={"step_number": step_number, "conflicts": len(result.conflicts)},
+                    type=EventType.PLAN_CREATED.value,
+                    session_id=request.session_id,
+                    payload=plan.to_dict(),
                 )
             )
-        self._emit_recorded(self.session_id, step)
-        return step
-
-    # -- plan-following helpers ------------------------------------------
-
-    def _verify_with_plan(
-        self, trace: List[TraceStep], plan: Optional[ExecutionPlan]
-    ) -> VerificationResult:
-        strategy = plan.verification_strategy if plan else VerificationStrategy.STANDARD
-        if strategy == VerificationStrategy.SKIP:
-            return VerificationResult(
-                is_valid=True, firewall_status="skipped", metadata={"skipped": True}
+        graph = build_execution_graph(plan, observable=observable, streaming=streaming)
+        request.metadata["execution_graph"] = graph
+        self.events.emit(
+            Event(
+                type=EventType.GRAPH_BUILT.value,
+                session_id=request.session_id,
+                payload={"nodes": [k.value for k in graph.kinds()]},
             )
-        rules = (
-            [{"min_confidence": _STRICT_MIN_CONFIDENCE}]
-            if strategy == VerificationStrategy.STRICT
-            else None
         )
-        return self.verifier.verify(trace, rules)
+        return plan, graph
 
-    @staticmethod
-    def _retry_allowed(plan: Optional[ExecutionPlan], req: RequestContext) -> bool:
-        if req.metadata.get("_arc_retry"):
-            return False
-        if plan is not None:
-            return plan.recovery_policy == RecoveryPolicy.RETRY_ONCE
-        return False
-
-    @staticmethod
-    def _checkpoint_recovery(plan: Optional[ExecutionPlan]) -> bool:
-        return plan is not None and plan.recovery_policy == RecoveryPolicy.CHECKPOINT
+    def _stream_request(
+        self, payload: Dict[str, Any], context_sources: Optional[List[Dict[str, Any]]]
+    ) -> RequestContext:
+        return RequestContext(
+            session_id=self.session_id,
+            provider=self.config.provider,
+            payload=payload,
+            context_sources=list(context_sources or []),
+        )
 
     # -- helpers ----------------------------------------------------------
 
@@ -551,42 +478,24 @@ class ARCRuntime:
         invoke: "AsyncInvoke",
         context_sources: Optional[List[Dict[str, Any]]] = None,
     ) -> Any:
-        """Async equivalent of :meth:`run_create` for ``AsyncAnthropic`` clients."""
+        """Async equivalent of :meth:`run_create` for ``AsyncAnthropic`` clients.
+
+        Async requests bypass the sync middleware onion; the planner is invoked
+        directly during graph compilation. The graph and services are identical
+        to the sync path — only the dispatch node is awaited.
+        """
         request = RequestContext(
             session_id=self.session_id,
             provider=self.config.provider,
             payload=payload,
             context_sources=list(context_sources or []),
         )
-        # Run the sync middleware pipeline in a thread-safe way, then await core.
-        response_ctx = await self._async_core(request, invoke)
-        return response_ctx.metadata["raw_response"]
-
-    async def _async_core(
-        self, req: RequestContext, invoke: "AsyncInvoke"
-    ) -> "ResponseContext":
-        step_number = self.recorder.next_step_number(req.session_id)
-        _, conflicts = self.firewall.filter(req.context_sources)
-        self.events.emit(
-            Event(
-                type="request_started",
-                session_id=req.session_id,
-                payload={"step_number": step_number, "conflicts": len(conflicts), "async": True},
-            )
+        observable = payload.get("stream") is not True
+        ctx = self._new_context(
+            request, streaming=False, observable=observable, is_async=True
         )
-        self.recovery.checkpoint(req.session_id, step_number, {"step": step_number})
-        input_summary = self._input_summary(req.payload)
-
-        start = time.perf_counter()
-        try:
-            raw = await invoke(req.payload)
-        except Exception as exc:  # noqa: BLE001 - record then re-raise unchanged
-            latency = (time.perf_counter() - start) * 1000.0
-            self._record_failure(req.session_id, step_number, input_summary, str(exc), latency)
-            raise
-
-        latency = (time.perf_counter() - start) * 1000.0
-        return self._record_message(req, step_number, input_summary, latency, raw, None)  # type: ignore[arg-type]
+        await self.executor.execute_async(ctx, invoke)
+        return ctx.response
 
     async def async_begin_stream(
         self,
@@ -594,37 +503,11 @@ class ARCRuntime:
         context_sources: Optional[List[Dict[str, Any]]],
     ) -> int:
         """Async equivalent of :meth:`begin_stream`."""
-        step_number = self.recorder.next_step_number(self.session_id)
-        request = RequestContext(
-            session_id=self.session_id,
-            provider=self.config.provider,
-            payload=payload,
-            context_sources=list(context_sources or []),
-        )
-        plan = self.planner.plan(request)
-        self._stream_plans[step_number] = plan
-        self.events.emit(
-            Event(
-                type=EventType.PLAN_CREATED.value,
-                session_id=self.session_id,
-                payload=plan.to_dict(),
-            )
-        )
-        _, conflicts = self.firewall.filter(request.context_sources)
-        self.events.emit(
-            Event(
-                type="request_started",
-                session_id=self.session_id,
-                payload={
-                    "step_number": step_number,
-                    "streaming": True,
-                    "async": True,
-                    "conflicts": len(conflicts),
-                },
-            )
-        )
-        self.recovery.checkpoint(self.session_id, step_number, {"step": step_number})
-        return step_number
+        request = self._stream_request(payload, context_sources)
+        ctx = self._new_context(request, streaming=True, observable=True, is_async=True)
+        self.executor.begin_stream(ctx)
+        self._stream_contexts[ctx.step_number] = ctx
+        return ctx.step_number
 
     async def async_finish_stream(
         self,
@@ -633,7 +516,7 @@ class ARCRuntime:
         latency_ms: float,
         final_message: Any,
         error: Optional[str],
-    ) -> TraceStep:
+    ) -> Optional[TraceStep]:
         """Async equivalent of :meth:`finish_stream`."""
         return self.finish_stream(step_number, payload, latency_ms, final_message, error)
 

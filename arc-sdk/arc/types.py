@@ -55,6 +55,7 @@ class EventType(str, Enum):
     """Well-known runtime events emitted on the event bus."""
 
     PLAN_CREATED = "plan_created"
+    GRAPH_BUILT = "graph_built"
     STEP_RECORDED = "step_recorded"
     CHECKPOINT_CREATED = "checkpoint_created"
     VERIFICATION_FAILED = "verification_failed"

@@ -1,9 +1,11 @@
 """In-memory Flight Recorder implementation.
 
-Records every intercepted step and reconstructs per-session traces. The
-confidence heuristic mirrors the backend ``FlightRecorder`` (start at 0.8,
-deduct for hedging phrases and very short responses) so scores are consistent
-across ARC surfaces.
+Records every intercepted step and reconstructs per-session traces.
+
+The recorder does **not** score confidence — confidence is derived by the
+Verification Engine from verification evidence and written onto the step at the
+verify node. ``build_step`` sets a neutral, unverified confidence
+(``UNVERIFIED_CONFIDENCE``), or ``0.0`` for a step that recorded a hard error.
 """
 
 from __future__ import annotations
@@ -13,26 +15,11 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 from ...types import StepType, TraceStep
-
-_HEDGES = ("i think", "probably", "i'm not sure", "might be")
-
-
-def calculate_confidence_score(response_text: Optional[str]) -> float:
-    """Heuristic confidence in ``response_text`` (0.1-1.0)."""
-    score = 0.8
-    if not response_text:
-        return max(0.1, min(1.0, round(score - 0.2, 2)))
-    lowered = response_text.lower()
-    for phrase in _HEDGES:
-        if phrase in lowered:
-            score -= 0.1
-    if len(response_text) < 50:
-        score -= 0.2
-    return max(0.1, min(1.0, round(score, 2)))
+from ..verification import UNVERIFIED_CONFIDENCE
 
 
 def generate_reasoning_summary(response_text: Optional[str]) -> str:
-    """First 100 whitespace-normalised characters of ``response_text``."""
+    """First 100 whitespace-normalised characters of ``response_text`` (a label, not a score)."""
     if not response_text:
         return ""
     return " ".join(response_text.strip().split())[:100]
@@ -67,8 +54,12 @@ class FlightRecorder:
         token_usage: Optional[Dict[str, int]] = None,
         error: Optional[str] = None,
     ) -> TraceStep:
-        """Construct a :class:`TraceStep`, scoring confidence from ``output_text``."""
-        confidence = 0.0 if error else calculate_confidence_score(output_text)
+        """Construct a :class:`TraceStep`.
+
+        Confidence is left at the unverified default (``0.0`` on error); the
+        verification engine overwrites it with an evidence-derived score.
+        """
+        confidence = 0.0 if error else UNVERIFIED_CONFIDENCE
         payload = dict(output_data or {})
         if output_text is not None:
             payload.setdefault("text", output_text)
@@ -99,4 +90,4 @@ class FlightRecorder:
             return list(self._steps.get(session_id, []))
 
 
-__all__ = ["FlightRecorder", "calculate_confidence_score", "generate_reasoning_summary"]
+__all__ = ["FlightRecorder", "generate_reasoning_summary"]
