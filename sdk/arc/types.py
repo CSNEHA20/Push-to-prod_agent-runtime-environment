@@ -6,7 +6,7 @@ Defines production-grade data structures for sessions, traces, firewall verifica
 from enum import Enum
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 def _utcnow_iso() -> str:
@@ -15,6 +15,7 @@ def _utcnow_iso() -> str:
 
 class SessionStatus(str, Enum):
     ACTIVE = "active"
+    RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
     RECOVERED = "recovered"
@@ -28,6 +29,12 @@ class StepType(str, Enum):
     RECOVERY_ROLLBACK = "recovery_rollback"
 
 
+class FirewallAction(str, Enum):
+    ALLOW = "allow"
+    BLOCK = "block"
+    SANITIZE = "sanitize"
+
+
 class ConflictItem(BaseModel):
     """Represents a conflict detected by the Context Firewall engine."""
     source_id: str = Field(..., description="ID of the conflicting data source")
@@ -35,6 +42,8 @@ class ConflictItem(BaseModel):
     description: str = Field(..., description="Detailed description of the conflict")
     confidence_score: float = Field(default=1.0, description="Confidence rating of conflict (0.0 to 1.0)")
     mitigation: Optional[str] = Field(default=None, description="Suggested mitigation action")
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
     def to_dict(self) -> Dict[str, Any]:
         return self.model_dump()
@@ -46,6 +55,22 @@ class VerificationResult(BaseModel):
     conflicts: List[ConflictItem] = Field(default_factory=list, description="List of detected conflicts")
     firewall_status: str = Field(default="pass", description="Status code: 'pass', 'warn', 'block'")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional verification metadata")
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return self.model_dump()
+
+
+class FirewallRule(BaseModel):
+    """Represents a security rule enforced by Context Firewall."""
+    id: str = Field(..., description="Unique rule ID")
+    rule_type: str = Field(..., description="Type of security rule (regex, vector, heuristic)")
+    action: FirewallAction = Field(default=FirewallAction.BLOCK, description="Enforcement action")
+    threshold: float = Field(default=0.8, description="Trigger sensitivity threshold")
+    pattern: Optional[str] = Field(default=None, description="Matching pattern or regex expression")
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
     def to_dict(self) -> Dict[str, Any]:
         return self.model_dump()
@@ -66,6 +91,8 @@ class TraceStep(BaseModel):
     timestamp: str = Field(default_factory=_utcnow_iso, description="ISO timestamp")
     error: Optional[str] = Field(default=None, description="Error message if step failed")
 
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
     def to_dict(self) -> Dict[str, Any]:
         return self.model_dump()
 
@@ -82,6 +109,8 @@ class Session(BaseModel):
     total_tokens: int = Field(default=0, description="Total tokens consumed across all steps")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Arbitrary session metadata")
 
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
     def to_dict(self) -> Dict[str, Any]:
         return self.model_dump()
 
@@ -90,6 +119,8 @@ class SessionList(BaseModel):
     """Container for list of agent sessions."""
     sessions: List[Session] = Field(default_factory=list, description="List of sessions")
     total_count: int = Field(default=0, description="Total count")
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
     def to_dict(self) -> Dict[str, Any]:
         return self.model_dump()
@@ -104,6 +135,23 @@ class Checkpoint(BaseModel):
     timestamp: str = Field(default_factory=_utcnow_iso, description="ISO timestamp")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Checkpoint context data")
 
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return self.model_dump()
+
+
+class RecoveryDiff(BaseModel):
+    """Represents state diff payload computed during failure recovery."""
+    id: str = Field(..., description="Unique recovery diff UUID")
+    session_id: str = Field(..., description="Parent session UUID")
+    failed_step_id: str = Field(..., description="Failed step UUID")
+    strategy_used: str = Field(..., description="Recovery strategy name")
+    diff_payload: Dict[str, Any] = Field(default_factory=dict, description="JSON state diff payload")
+    status: str = Field(default="computed", description="Status of recovery diff calculation")
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
     def to_dict(self) -> Dict[str, Any]:
         return self.model_dump()
 
@@ -116,6 +164,8 @@ class ReplayTimeline(BaseModel):
     failure_points: List[TraceStep] = Field(default_factory=list, description="Steps that encountered failures")
     recovery_checkpoints: List[Checkpoint] = Field(default_factory=list, description="Available rollback checkpoints")
 
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
     def to_dict(self) -> Dict[str, Any]:
         return self.model_dump()
 
@@ -127,6 +177,8 @@ class RecoveryPlan(BaseModel):
     recommended_checkpoint: Optional[Checkpoint] = Field(default=None, description="Optimal target checkpoint for rollback")
     available_checkpoints: List[Checkpoint] = Field(default_factory=list, description="List of all available checkpoints")
     recovery_actions: List[Dict[str, Any]] = Field(default_factory=list, description="Action items to restore health")
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
     def to_dict(self) -> Dict[str, Any]:
         return self.model_dump()
