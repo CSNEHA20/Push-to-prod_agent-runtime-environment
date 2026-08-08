@@ -5,8 +5,12 @@ Defines production-grade data structures for sessions, traces, firewall verifica
 
 from enum import Enum
 from typing import List, Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from pydantic import BaseModel, Field
+
+
+def _utcnow_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 class SessionStatus(str, Enum):
@@ -59,7 +63,7 @@ class TraceStep(BaseModel):
     latency_ms: float = Field(default=0.0, description="Execution time in milliseconds")
     token_usage: Dict[str, int] = Field(default_factory=dict, description="Tokens used: input_tokens, output_tokens")
     confidence_score: float = Field(default=1.0, description="Heuristic confidence score (0.0 to 1.0)")
-    timestamp: str = Field(default_factory=lambda: datetime.utcnow().isoformat(), description="ISO timestamp")
+    timestamp: str = Field(default_factory=_utcnow_iso, description="ISO timestamp")
     error: Optional[str] = Field(default=None, description="Error message if step failed")
 
     def to_dict(self) -> Dict[str, Any]:
@@ -72,7 +76,7 @@ class Session(BaseModel):
     agent_name: str = Field(..., description="Name of the protected agent")
     task: str = Field(..., description="Goal or prompt description")
     status: SessionStatus = Field(default=SessionStatus.ACTIVE, description="Current lifecycle status")
-    created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat(), description="Creation ISO timestamp")
+    created_at: str = Field(default_factory=_utcnow_iso, description="Creation ISO timestamp")
     updated_at: Optional[str] = Field(default=None, description="Last update ISO timestamp")
     total_steps: int = Field(default=0, description="Count of recorded steps")
     total_tokens: int = Field(default=0, description="Total tokens consumed across all steps")
@@ -97,7 +101,7 @@ class Checkpoint(BaseModel):
     session_id: str = Field(..., description="Parent session UUID")
     step_number: int = Field(..., description="Step index where state was saved")
     state_hash: Optional[str] = Field(default=None, description="Cryptographic state checksum")
-    timestamp: str = Field(default_factory=lambda: datetime.utcnow().isoformat(), description="ISO timestamp")
+    timestamp: str = Field(default_factory=_utcnow_iso, description="ISO timestamp")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Checkpoint context data")
 
     def to_dict(self) -> Dict[str, Any]:

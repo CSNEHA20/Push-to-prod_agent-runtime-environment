@@ -4,6 +4,7 @@ Provides transparent Anthropic client wrapping, automatic Flight Recorder step t
 Fully decoupled from backend server internals.
 """
 
+import os
 import time
 import uuid
 import inspect
@@ -111,6 +112,13 @@ class AsyncStepContext:
         )
 
 
+def _is_mock_key(key: Optional[str]) -> bool:
+    if not key:
+        return False
+    k = key.lower()
+    return k in ("mock-key", "...", "your-api-key", "test-key") or k.startswith("mock-")
+
+
 class ARCAgent:
     """
     Synchronous ARCAgent protector for Claude workflows.
@@ -133,14 +141,18 @@ class ARCAgent:
         self.server_url = server_url.rstrip("/")
         self.dashboard_base_url = dashboard_url.rstrip("/")
         self.session_id = str(session_id) if session_id else str(uuid.uuid4())
-        self.mock_mode = mock_mode
 
-        self.arc_client = arc_client or ARC(server_url=self.server_url)
+        from . import _global_config
+        global_anthropic_key = _global_config.get("anthropic_api_key") or os.getenv("ANTHROPIC_API_KEY")
 
-        if mock_mode:
+        if mock_mode or _is_mock_key(global_anthropic_key):
+            self.mock_mode = True
             self.anthropic_client = MockAnthropicClient()
         else:
+            self.mock_mode = False
             self.anthropic_client = anthropic_client
+
+        self.arc_client = arc_client or ARC(server_url=self.server_url)
 
         self._local_steps: List[TraceStep] = []
         self._init_session()
@@ -209,6 +221,7 @@ class ARCAgent:
         max_tokens: int = 1024,
         tools: Optional[List[Dict[str, Any]]] = None,
         system: Optional[str] = None,
+        context_sources: Optional[List[Dict[str, Any]]] = None,
     ) -> str:
         """
         Call Claude API under ARC protection with automatic step tracing and latency monitoring.
@@ -221,12 +234,15 @@ class ARCAgent:
             kwargs["system"] = system
 
         if self.anthropic_client is None:
-            try:
-                import anthropic
-                self.anthropic_client = anthropic.Anthropic()
-            except Exception:
-                if not self.mock_mode:
-                    logger.warning("No Anthropic API key or client available. Enabling mock client mode.")
+            key = os.getenv("ANTHROPIC_API_KEY")
+            if _is_mock_key(key) or self.mock_mode:
+                self.mock_mode = True
+                self.anthropic_client = MockAnthropicClient()
+            else:
+                try:
+                    import anthropic
+                    self.anthropic_client = anthropic.Anthropic()
+                except Exception:
                     self.mock_mode = True
                     self.anthropic_client = MockAnthropicClient()
 
@@ -278,7 +294,15 @@ class ARCAgent:
         start_time = time.time()
         try:
             if isinstance(tool_input, dict):
-                res = tool_fn(**tool_input)
+                try:
+                    res = tool_fn(**tool_input)
+                except TypeError:
+                    res = tool_fn(tool_input)
+            elif isinstance(tool_input, (tuple, list)):
+                try:
+                    res = tool_fn(*tool_input)
+                except TypeError:
+                    res = tool_fn(tool_input)
             else:
                 res = tool_fn(tool_input)
 
@@ -339,14 +363,18 @@ class AsyncARCAgent:
         self.server_url = server_url.rstrip("/")
         self.dashboard_base_url = dashboard_url.rstrip("/")
         self.session_id = str(session_id) if session_id else str(uuid.uuid4())
-        self.mock_mode = mock_mode
 
-        self.arc_client = arc_client or AsyncARC(server_url=self.server_url)
+        from . import _global_config
+        global_anthropic_key = _global_config.get("anthropic_api_key") or os.getenv("ANTHROPIC_API_KEY")
 
-        if mock_mode:
+        if mock_mode or _is_mock_key(global_anthropic_key):
+            self.mock_mode = True
             self.anthropic_client = MockAnthropicClient()
         else:
+            self.mock_mode = False
             self.anthropic_client = anthropic_client
+
+        self.arc_client = arc_client or AsyncARC(server_url=self.server_url)
 
         self._local_steps: List[TraceStep] = []
 
@@ -401,6 +429,7 @@ class AsyncARCAgent:
         max_tokens: int = 1024,
         tools: Optional[List[Dict[str, Any]]] = None,
         system: Optional[str] = None,
+        context_sources: Optional[List[Dict[str, Any]]] = None,
     ) -> str:
         start_time = time.time()
         kwargs: Dict[str, Any] = {"model": model, "max_tokens": max_tokens, "messages": messages}
@@ -410,12 +439,15 @@ class AsyncARCAgent:
             kwargs["system"] = system
 
         if self.anthropic_client is None:
-            try:
-                import anthropic
-                self.anthropic_client = anthropic.AsyncAnthropic()
-            except Exception:
-                if not self.mock_mode:
-                    logger.warning("No Anthropic API key or client available. Enabling mock client mode.")
+            key = os.getenv("ANTHROPIC_API_KEY")
+            if _is_mock_key(key) or self.mock_mode:
+                self.mock_mode = True
+                self.anthropic_client = MockAnthropicClient()
+            else:
+                try:
+                    import anthropic
+                    self.anthropic_client = anthropic.AsyncAnthropic()
+                except Exception:
                     self.mock_mode = True
                     self.anthropic_client = MockAnthropicClient()
 
@@ -469,12 +501,28 @@ class AsyncARCAgent:
         try:
             if inspect.iscoroutinefunction(tool_fn):
                 if isinstance(tool_input, dict):
-                    res = await tool_fn(**tool_input)
+                    try:
+                        res = await tool_fn(**tool_input)
+                    except TypeError:
+                        res = await tool_fn(tool_input)
+                elif isinstance(tool_input, (tuple, list)):
+                    try:
+                        res = await tool_fn(*tool_input)
+                    except TypeError:
+                        res = await tool_fn(tool_input)
                 else:
                     res = await tool_fn(tool_input)
             else:
                 if isinstance(tool_input, dict):
-                    res = tool_fn(**tool_input)
+                    try:
+                        res = tool_fn(**tool_input)
+                    except TypeError:
+                        res = tool_fn(tool_input)
+                elif isinstance(tool_input, (tuple, list)):
+                    try:
+                        res = tool_fn(*tool_input)
+                    except TypeError:
+                        res = tool_fn(tool_input)
                 else:
                     res = tool_fn(tool_input)
 
@@ -536,7 +584,8 @@ def protected(name: str = "Protected Function", task: str = "Execute Function"):
             @wraps(fn)
             async def async_wrapper(*args, **kwargs):
                 agent = AsyncARCAgent(name=name, task=task)
-                res = await agent.arun_tool(fn.__name__, kwargs or args, fn)
+                tool_input = kwargs if kwargs else (args if len(args) > 1 else (args[0] if len(args) == 1 else {}))
+                res = await agent.arun_tool(fn.__name__, tool_input, fn)
                 await agent.acomplete(output=res)
                 return res
             return async_wrapper
@@ -544,7 +593,8 @@ def protected(name: str = "Protected Function", task: str = "Execute Function"):
             @wraps(fn)
             def sync_wrapper(*args, **kwargs):
                 agent = ARCAgent(name=name, task=task)
-                res = agent.run_tool(fn.__name__, kwargs or args, fn)
+                tool_input = kwargs if kwargs else (args if len(args) > 1 else (args[0] if len(args) == 1 else {}))
+                res = agent.run_tool(fn.__name__, tool_input, fn)
                 agent.complete(output=res)
                 return res
             return sync_wrapper
