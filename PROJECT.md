@@ -125,36 +125,36 @@ ARC is a governance, observability, and self-healing runtime platform designed f
 
 ---
 
-## 5. Folder Structure
+## 5. Modular Folder Structure (`arc-sdk`)
 
 ```
-agent-runtime-core/
-├── PROJECT.md               # Single Source of Truth Architecture Spec
-├── README.md                # Project Overview & Quickstart
-├── CLAUDE.md                # Development Instructions & Commands
-├── .agents/                 # Workspace Rules & Protocol Directives
-├── sdk/                     # Standalone Arc Python SDK Package (arc-sdk)
-│   ├── arc/                 # Core SDK Package Module
-│   │   ├── __init__.py      # High-level exports
-│   │   ├── agent.py         # Agent wrapper
-│   │   ├── client.py        # API client
-│   │   ├── cli.py           # CLI entry points
-│   │   ├── types.py         # Data models & typings
-│   │   └── exceptions.py   # Custom error types
-│   ├── pyproject.toml       # Package metadata & build definition
-│   └── tests/               # SDK test suite
-├── arc/                     # Core Platform Implementation
-│   ├── backend/             # FastAPI Server & Runtime Engines
-│   │   ├── api/             # HTTP & WebSocket Controllers
-│   │   ├── core/            # Flight Recorder, Firewall, Recovery Engine
-│   │   ├── db/              # Database Models & Connections
-│   │   └── main.py          # Backend Entry Point
-│   ├── frontend/            # React + Vite Management Dashboard
-│   └── demo/                # Synthetic Chaos Testing Scripts
-└── docs/                    # Architectural Specifications & Guides
+arc-sdk/
+├── runtime/                 # Modular Core Execution Engines
+│   ├── scheduler/           # Execution scheduling & loop management
+│   ├── recovery/            # Self-healing rollback & state checkpointing
+│   ├── verifier/            # Compliance & policy verification
+│   ├── firewall/            # Context security & conflict filtering
+│   ├── recorder/            # Execution step tracing (Flight Recorder)
+│   ├── plugins/             # Extensible runtime plugins
+│   ├── middleware/          # Interceptor middleware pipeline
+│   └── events/              # Event broker & pub-sub dispatcher
+├── sdk/                     # Core Python SDK Interfaces & Client
+├── cli/                     # Command-line developer tool (`arc`)
+├── dashboard/               # Real-time management UI frontend
+├── integrations/            # Framework Adapters & Middleware
+│   ├── anthropic/           # Anthropic Claude client wrapper
+│   ├── openai/              # OpenAI API protection wrapper
+│   ├── langgraph/           # LangGraph state protection adapter
+│   ├── crewai/              # CrewAI multi-agent workflow adapter
+│   ├── autogen/             # AutoGen conversational agent adapter
+│   └── openhands/           # OpenHands runtime execution adapter
+├── examples/                # Integration examples & demos
+├── tests/                   # Unit & integration test suite
+└── docs/                    # Modular documentation & guides
 ```
 
 ---
+
 
 ## 6. Interfaces & Data Models
 

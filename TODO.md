@@ -80,3 +80,20 @@ This document outlines the granular, ordered milestones for building, refining, 
 - **Goal**: Build visual JSON side-by-side diff renderer for recovery steps and failed state snapshots.
 - **Test**: Verify UI component renders mock state diffs properly in browser.
 - **Success Criteria**: Interactive diff highlights added, modified, and deleted keys clearly.
+
+---
+
+## Phase 4: Modular Architecture & Multi-Framework Integrations
+
+### M4.1: Modularize Core Runtime Engines
+- **Files**: `sdk/arc/runtime/` (`scheduler`, `recovery`, `verifier`, `firewall`, `recorder`, `plugins`, `middleware`, `events`)
+- **Goal**: Refactor monolithic engine files into dedicated modular runtime sub-packages.
+- **Test**: `pytest sdk/tests/test_runtime_modules.py`.
+- **Success Criteria**: All runtime engines operate cleanly as decoupled sub-modules.
+
+### M4.2: Implement Multi-Framework Integration Layer
+- **Files**: `sdk/arc/integrations/` (`anthropic`, `openai`, `langgraph`, `crewai`, `autogen`, `openhands`)
+- **Goal**: Build dedicated framework adapters for Anthropic, OpenAI, LangGraph, CrewAI, AutoGen, and OpenHands.
+- **Test**: `pytest sdk/tests/test_integrations.py`.
+- **Success Criteria**: Protection wrappers successfully intercept agent calls across all 6 target frameworks.
+
